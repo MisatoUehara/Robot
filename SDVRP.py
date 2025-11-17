@@ -7,21 +7,21 @@ random.seed(0)
 def read_data():
     
     global B,R,K,V,Q,c,c_x,c_y,d
-    n=7
+    n=10
     B=[i for i in range(n)]  #0代表depot
-    d=[random.randint(0,7) for i in range(n)] #需求
-
+    d=[random.randint(0,8) for i in range(n)] #需求
     Q=4 #容量
-    V = [i for i in range(math.ceil(sum(d)/Q))]
 
     c_x={i:random.uniform(0,10) for i in B}
     c_y={i:random.uniform(0,10) for i in B}
+
     c = {}
     for i in B:
         for j in B:
             if i != j:
                 distance = math.sqrt((c_x[i] - c_x[j])**2 + (c_y[i] - c_y[j])**2)
                 c[(i,j)] = round(distance)
+    V = [i for i in range(math.ceil(sum(d)/Q))] #车辆数
 
     print(d)
 
