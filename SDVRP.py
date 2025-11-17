@@ -6,20 +6,24 @@ random.seed(0)
 
 def read_data():
     
-    global B,R,K,V,Q,c,d
-    B=[0,1,2,3,4,5]  #0代表depot
-    d=[0,1,2,3,4,5]
+    global B,R,K,V,Q,c,c_x,c_y,d
+    n=7
+    B=[i for i in range(n)]  #0代表depot
+    d=[random.randint(0,7) for i in range(n)] #需求
 
-    Q=4
+    Q=4 #容量
     V = [i for i in range(math.ceil(sum(d)/Q))]
-    c={}#无法用一行快速表示，会导致距离不对称
+
+    c_x={i:random.uniform(0,10) for i in B}
+    c_y={i:random.uniform(0,10) for i in B}
+    c = {}
     for i in B:
         for j in B:
-            if i < j:
-                distance = random.randint(1, 10)
-                c[(i,j)] = distance
-                c[(j,i)] = distance
+            if i != j:
+                distance = math.sqrt((c_x[i] - c_x[j])**2 + (c_y[i] - c_y[j])**2)
+                c[(i,j)] = round(distance)
 
+    print(d)
 
 def model():
     #4,subtour elimination cut
@@ -63,3 +67,17 @@ def model():
 if __name__ == "__main__":
     read_data()
     model()
+
+
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(8, 6))
+    for i in B:
+        plt.scatter(c_x[i], c_y[i], s=100)
+        plt.annotate(str(i), (c_x[i], c_y[i]), xytext=(5, 5), textcoords='offset points')
+
+    plt.xlabel('X Coordinate')
+    plt.ylabel('Y Coordinate')
+    plt.title('Node Locations')
+    plt.grid(True, alpha=0.3)
+    plt.show()
