@@ -8,6 +8,24 @@ random.seed(0)
 
 def read_data():
 
+    # input,一阶段都用大写字母,二阶段都用小写字母
+    # 一阶段数据
+    B=[i for i in range(15)]                    #仓库(0)和楼栋编号
+
+    C={}#无法用一行快速表示，会导致距离不对称
+    for i in B:
+        for j in B:
+            if i < j:
+                distance = random.randint(1, 10)
+                C[(i,j)] = distance
+                C[(j,i)] = distance
+            else:
+                C[i,j]=0
+
+    D={i:random.randint(0,10) for i in B}       #需求
+    D[0]=0                                      #仓库(0)需求为0
+
+
     #input重构，拆分需求大于4的节点
     B_ = {0: 0}  # depot保持原样
     D_ = {0: 0}  # depot需求为0
@@ -24,16 +42,20 @@ def read_data():
 
     # 计算距离矩阵
     C_ = {}
+
     for i in B_:
         for j in B_:
             if i != j:
                 C_[(i,j)] = C[(B_[i], B_[j])]
 
-    return B_,C_,D_
+    # 机器人派出次数编号
+    Q=4                                         #机器人容量
+    V = [i for i in range(math.ceil(sum(D.values())/Q))]
+
+    return C_,B_,D_,V,Q
 
 #CVRP模型,一阶段处理楼栋配送,二阶段处理楼内配送
-def CVRP(B,C,D,Q=4):
-    V = [i for i in range(math.ceil(sum(D.values())/Q))]
+def CVRP(C,B,D,V,Q):
 
     #约束5,子回路消除和载重约束约束,作为lazy constraint动态加入
     def Cut(model,where):
@@ -67,61 +89,29 @@ def CVRP(B,C,D,Q=4):
     MD1.Params.OutputFlag=0 #不输出求解过程
     MD1.optimize(Cut)
 
-    #构造回路
     edges = [(i,j) for (i,j) in C if x[i,j].X > 0.5]
+    print(edges)
+
     G = networkx.DiGraph()
     G.add_edges_from(edges)
     cycles = list(networkx.simple_cycles(G))
-    # print("Cycles:", cycles)
-    # print(MD1.ObjVal)
-    # # 画出网络图
-    # pos = nx.spring_layout(G)
-    # plt.figure(figsize=(12, 8))
-    # nx.draw_networkx_nodes(G, pos, node_color='lightblue', node_size=500)
-    # nx.draw_networkx_edges(G, pos, edge_color='black', arrows=True, arrowsize=20)
-    # nx.draw_networkx_labels(G, pos)
-
-    # # 添加边的权重标签
-    # edge_labels = {(i,j): C[i,j] for (i,j) in edges}
-    # nx.draw_networkx_edge_labels(G, pos, edge_labels)
-
-    # plt.title("CVRP Solution Network")
-    # plt.axis('off')
-    # plt.show()
+    print("Cycles:", cycles)
 
     return cycles
 
 
 if __name__ == "__main__":
-
-
-    # input,一阶段都用大写字母,二阶段都用小写字母
-    # 一阶段数据
-    B=[i for i in range(15)]                    #仓库(0)和楼栋编号
-    C={}                                        #距离
-    for i in B:
-        for j in B:
-            if i != j:
-                distance = random.randint(20, 50)
-                C[(i,j)] = distance
-                C[(j,i)] = distance
-            else:
-                C[i,j]=0
-    D={i:random.randint(0,40) for i in B}       #随机需求
-    D[0]=0                                      #仓库(0)需求为0
-
-
-    #一阶段求解
-    B_,C_,D_ = read_data()
-    CYCCLES=CVRP(B_,C_,D_)
+    C_,B_,D_,V,Q = read_data()
+    cycles=CVRP(C_,B_,D_,V,Q)
 
     # 将cycle中的B_路径转换为原始的B路径
-    ORIGINAL_CYCCLES = []
-    for i in CYCCLES:
+    original_cycles = []
+    for i in cycles:
         original_cycle = []
         for node in i:
             original_cycle.append(B_[node])  # 转换为原始楼栋编号
-        ORIGINAL_CYCCLES.append(original_cycle+[0])
+        original_cycles.append(original_cycle+[0])
 
-    print("需求:",D)
-    print("大楼配送方案:", ORIGINAL_CYCCLES,"共%d次"%(len(ORIGINAL_CYCCLES)))
+    print("大楼配送方案:", original_cycles)
+
+
