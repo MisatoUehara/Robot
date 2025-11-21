@@ -2,23 +2,24 @@ from gurobipy import *
 import math,random,networkx
 import numpy as np
 import networkx as nx
+import matplotlib.pyplot as plt
 
 random.seed(0)
 
 def read_data():
-    global B,R,K,V,Q,X,Y,D,B_,D_,C_,X_,Y_,A,N,C
+    global c,b,d,v,Q,c_
     
-    #input
-    B=[i for i in range(15)]                     #仓库(0)和楼栋编号
+    # input,一阶段都用大写字母,二阶段都用小写字母
+    # 一阶段数据
+    B=[i for i in range(15)]                    #仓库(0)和楼栋编号
 
     X={i:random.uniform(0,10) for i in B}       #坐标x
     Y={i:random.uniform(0,10) for i in B}       #坐标y
 
-    D=[random.randint(0,10) for i in B]  #需求
+    D={i:random.randint(0,10) for i in B}       #需求
     D[0]=0                                      #仓库(0)需求为0
 
     Q=4                                         #机器人容量
-
 
 
 
@@ -51,98 +52,68 @@ def read_data():
                 C_[(i,j)] = round(distance)
 
     # 机器人派出次数编号
-    V = [i for i in range(math.ceil(sum(D)/Q))]
+    V = [i for i in range(math.ceil(sum(D.values())/Q))]
+    print(D)
+    return C_,B_,D_,V,Q
 
-#CVRP模型建立大楼配送模型
-def CVRP():
+#CVRP模型,一阶段处理楼栋配送,二阶段处理楼内配送
+def CVRP(C,B,D,V,Q):
 
     #约束5,子回路消除和载重约束约束,作为lazy constraint动态加入
     def Cut(model,where):
         if where == GRB.Callback.MIPSOL:
-            edges = [(i,j) for (i,j) in C_ if model.cbGetSolution(x[i,j]) > 0.5]
+            edges = [(i,j) for (i,j) in C if model.cbGetSolution(x[i,j]) > 0.5]
             G = networkx.DiGraph()
             G.add_edges_from(edges)
 
-            Cycles = list(networkx.simple_cycles(G))
-            for S in Cycles:
+            cycles = list(networkx.simple_cycles(G))
+            for S in cycles:
                 S = [i for i in S if i != 0]
                 #约束5,子回路消除和载重约束约束,作为lazy constraint动态加入,消除子回路和超载回路
-                model.cbLazy(quicksum(x[i,j] for i in B_ if i not in S for j in S if i!=j) >= math.ceil(sum(D_[i] for i in S) / Q))
+                model.cbLazy(quicksum(x[i,j] for i in B if i not in S for j in S if i!=j) >= math.ceil(sum(D[i] for i in S) / Q))
 
     MD1 = Model()
 
-    x  = MD1.addVars([(i,j) for (i,j) in C_], vtype=GRB.BINARY)
+    x  = MD1.addVars([(i,j) for (i,j) in C], vtype=GRB.BINARY)
 
     #约束1,每个客户节点必须有且仅有一条出边（除仓库外）
-    MD1.addConstrs(quicksum(x[i,j] for j in B_ if j!=i)==1 for i in B_ if i!=0)
-    #约束2,每个客户节点必须有且仅有一条入边（除仓库外
-    MD1.addConstrs(quicksum(x[i,j] for i in B_ if j!=i)==1 for j in B_ if j!=0)
+    MD1.addConstrs(quicksum(x[i,j] for j in B if j!=i)==1 for i in B if i!=0)
+    #约束2,每个客户节点必须有且仅有一条入边（除仓库外）
+    MD1.addConstrs(quicksum(x[i,j] for i in B if j!=i)==1 for j in B if j!=0)
     #约束3,从仓库出发的车辆数等于返回仓库的车辆数（流平衡约束）
-    MD1.addConstr(quicksum(x[0,j] for j in B_ if j!=0)==quicksum(x[i,0] for i in B_ if i!=0))
+    MD1.addConstr(quicksum(x[0,j] for j in B if j!=0)==quicksum(x[i,0] for i in B if i!=0))
     #约束4,从仓库出发的车辆数至少为所需最少车辆数
-    MD1.addConstr(quicksum(x[0, j] for j in B_ if j != 0) >= len(V))
+    MD1.addConstr(quicksum(x[0, j] for j in B if j != 0) >= len(V))
 
     #目标函数
-    MD1.setObjective(quicksum(C_[i,j]*x[i,j] for (i,j) in C_), GRB.MINIMIZE)
+    MD1.setObjective(quicksum(C[i,j]*x[i,j] for (i,j) in C), GRB.MINIMIZE)
     MD1.Params.lazyConstraints = 1
-    # MD1.Params.OutputFlag=0 #不输出求解过程
+    MD1.Params.OutputFlag=0 #不输出求解过程
     MD1.optimize(Cut)
 
-    edges = [(i,j) for (i,j) in C_ if x[i,j].X > 0.5]
+    edges = [(i,j) for (i,j) in C if x[i,j].X > 0.5]
     print(edges)
+
     G = networkx.DiGraph()
     G.add_edges_from(edges)
-    Cycles = list(networkx.simple_cycles(G))
-    print("Cycles:", Cycles)
+    cycles = list(networkx.simple_cycles(G))
+    print("Cycles:", cycles)
 
-
-    import matplotlib.pyplot as plt
-    def plot_routes():
-        plt.figure(figsize=(10, 8))
-        
-        # 设置科研风格
-        plt.style.use('default')
-        plt.rcParams['font.size'] = 12
-        plt.rcParams['axes.linewidth'] = 1.2
-        
-        # 绘制节点
-        # Depot (节点0) - 红色正方形
-        plt.scatter(X_[0], Y_[0], c='red', s=200, marker='s', 
-                   label='Depot', edgecolors='black', linewidth=2, zorder=5)
-        
-        # 客户节点 - 蓝色圆圈
-        customer_nodes = [i for i in B_ if i != 0]
-        customer_x = [X_[i] for i in customer_nodes]
-        customer_y = [Y_[i] for i in customer_nodes]
-        plt.scatter(customer_x, customer_y, c='blue', s=150, marker='o', 
-                   label='Customers', edgecolors='black', linewidth=2, zorder=4)
-        
-        # 绘制路径
-        for (i, j) in edges:
-            plt.arrow(X_[i], Y_[i], X_[j] - X_[i], Y_[j] - Y_[i], 
-                     head_width=0.15, head_length=0.1, fc='gray', ec='gray',
-                     length_includes_head=True, zorder=3)
-        
-        # 添加节点标签
-        for i in B_:
-            plt.annotate(f'{i}({D_[i]})', (X_[i], Y_[i]), 
-                        xytext=(5, 5), textcoords='offset points',
-                        fontsize=9, ha='left')
-        
-        plt.xlabel('X Coordinate')
-        plt.ylabel('Y Coordinate')
-        plt.title('Capacity Vehicle Routing Problem Solution')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.axis('equal')
-        plt.tight_layout()
-        plt.show()
-
-    plot_routes()
-
-
+    return cycles
 
 
 if __name__ == "__main__":
-    read_data()
-    CVRP()
+    C_,B_,D_,V,Q = read_data()
+    cycles=CVRP(C_,B_,D_,V,Q)
+
+    # 将cycle中的B_路径转换为原始的B路径
+    original_cycles = []
+    for i in cycles:
+        original_cycle = []
+        for node in i:
+            original_cycle.append(B_[node])  # 转换为原始楼栋编号
+        original_cycles.append(original_cycle+[0])
+
+    print("大楼配送方案:", original_cycles)
+
+
