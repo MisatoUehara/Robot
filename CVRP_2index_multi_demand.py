@@ -34,7 +34,6 @@ def read_data():
 #CVRP模型,一阶段处理楼栋配送,二阶段处理楼内配送
 def CVRP(B,C,D,Q=4):
     V = [i for i in range(math.ceil(sum(D.values())/Q))]
-
     #约束5,子回路消除和载重约束约束,作为lazy constraint动态加入
     def Cut(model,where):
         if where == GRB.Callback.MIPSOL:
@@ -43,11 +42,12 @@ def CVRP(B,C,D,Q=4):
             G.add_edges_from(edges)
 
             cycles = list(networkx.simple_cycles(G))
+            # print("Cycles (lazy):", cycles)
             for S in cycles:
                 S = [i for i in S if i != 0]
-                #约束5,子回路消除和载重约束约束,作为lazy constraint动态加入,消除子回路和超载回路
-                model.cbLazy(quicksum(x[i,j] for i in B if i not in S for j in S if i!=j) >= math.ceil(sum(D[i] for i in S) / Q))
-
+                if len(S) > 1: #理论上可以不加这句,但是会导致在出现类似[0,1]的回路gurobi的数值问题
+                    #约束5,子回路消除和载重约束约束,作为lazy constraint动态加入,消除子回路和超载回路
+                    model.cbLazy(quicksum(x[i,j] for i in B if i not in S for j in S if i!=j) >= math.ceil(sum(D[i] for i in S) / Q))
     MD1 = Model()
 
     x  = MD1.addVars([(i,j) for (i,j) in C], vtype=GRB.BINARY)
@@ -58,13 +58,13 @@ def CVRP(B,C,D,Q=4):
     MD1.addConstrs(quicksum(x[i,j] for i in B if j!=i)==1 for j in B if j!=0)
     #约束3,从仓库出发的车辆数等于返回仓库的车辆数（流平衡约束）
     MD1.addConstr(quicksum(x[0,j] for j in B if j!=0)==quicksum(x[i,0] for i in B if i!=0))
-    #约束4,从仓库出发的车辆数至少为所需最少车辆数
-    MD1.addConstr(quicksum(x[0, j] for j in B if j != 0) >= len(V))
+    # #约束4,从仓库出发的车辆数为所需最少车辆数
+    MD1.addConstr(quicksum(x[0, j] for j in B if j != 0) == len(V))
 
     #目标函数
     MD1.setObjective(quicksum(C[i,j]*x[i,j] for (i,j) in C), GRB.MINIMIZE)
     MD1.Params.lazyConstraints = 1
-    MD1.Params.OutputFlag=0 #不输出求解过程
+    # MD1.Params.OutputFlag=0 #不输出求解过程
     MD1.optimize(Cut)
 
     #构造回路
