@@ -116,7 +116,7 @@ def CVRP(B,C,D,Q=4):
 
 
 if __name__ == "__main__":
-    total_obj=0
+    sum_obj=0
 
     # input,一阶段都用大写字母,二阶段都用小写字母,主要参数B,C,D,a,b,c,d
     # 一阶段数据
@@ -137,7 +137,7 @@ if __name__ == "__main__":
     #一阶段求解
     B_,C_,D_ = reform_data(B,C,D,level=1)
     CYCCLES,obj=CVRP(B_,C_,D_)
-    total_obj+=obj
+    sum_obj+=obj
 
     # 将cycle中的B_路径转换为原始的B路径
     ORIGINAL_CYCCLES = []
@@ -161,7 +161,7 @@ if __name__ == "__main__":
     # 二阶段求解
     b_,c_,d_ = reform_data(b,c,d,level=2)
     cycles,obj=CVRP(b_,c_,d_)
-    total_obj+=obj
+    sum_obj+=obj
 
     # 结果输出,全向图路径
     original_cycles = []
@@ -194,4 +194,4 @@ if __name__ == "__main__":
         physical_path.append(detailed_path)
 
     print("楼内物理网络配送方案:", physical_path)
-    print("总配送距离:",total_obj)
+    print("总配送距离:",sum_obj)
