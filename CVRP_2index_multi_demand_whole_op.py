@@ -296,11 +296,12 @@ if __name__ == "__main__":
                     continue
                 
                 # 从已排序的房间列表中取出相近楼层的房间
+                # 重要：每个房间的包裹必须在同一次访问中全部配送完，不能拆分到多次访问
                 allocated = 0
-                start_idx = building_room_index[building_id]
                 rooms_in_this_visit = []
                 
-                i = start_idx
+                # 第一遍：从当前索引开始，尽量分配连续的房间
+                i = building_room_index[building_id]
                 while i < len(building_all_room_demands[building_id]) and allocated < visit_demand:
                     room_id, original_packages = building_all_room_demands[building_id][i]
                     remaining_in_room = building_room_remaining[building_id].get(room_id, 0)
@@ -309,29 +310,94 @@ if __name__ == "__main__":
                         i += 1
                         continue
                     
-                    can_take = min(remaining_in_room, visit_demand - allocated)
+                    # 只有当这个房间的所有包裹都能放入本次访问时，才分配这个房间
+                    if remaining_in_room <= (visit_demand - allocated):
+                        # 可以完整分配这个房间的所有包裹
+                        can_take = remaining_in_room
+                        
+                        # 更新全局building_room_demands（用于显示）
+                        if room_id not in building_room_demands[building_id]:
+                            building_room_demands[building_id][room_id] = can_take
+                        else:
+                            building_room_demands[building_id][room_id] += can_take
+                        
+                        # 更新本路线的房间需求
+                        if room_id not in route_room_demands[building_id]:
+                            route_room_demands[building_id][room_id] = can_take
+                            rooms_in_this_visit.append(room_id)
+                        else:
+                            route_room_demands[building_id][room_id] += can_take
+                        
+                        allocated += can_take
+                        building_room_remaining[building_id][room_id] = 0
+                        
+                        # 更新索引：移动到下一个未分配的房间
+                        building_room_index[building_id] = i + 1
                     
-                    # 更新全局building_room_demands（用于显示）
-                    if room_id not in building_room_demands[building_id]:
-                        building_room_demands[building_id][room_id] = can_take
-                    else:
-                        building_room_demands[building_id][room_id] += can_take
-                    
-                    # 更新本路线的房间需求
-                    if room_id not in route_room_demands[building_id]:
-                        route_room_demands[building_id][room_id] = can_take
-                        rooms_in_this_visit.append(room_id)
-                    else:
-                        route_room_demands[building_id][room_id] += can_take
-                    
-                    allocated += can_take
-                    building_room_remaining[building_id][room_id] -= can_take
-                    
-                    # 如果这个房间还有剩余，不要移动索引
-                    if building_room_remaining[building_id][room_id] <= 0:
-                        i += 1
-                        building_room_index[building_id] = i
-                    # 否则保持在当前索引，下次访问继续从这个房间开始
+                    i += 1
+                
+                # 第二遍：如果还没凑够，回到开头寻找之前跳过的房间
+                if allocated < visit_demand:
+                    for i in range(len(building_all_room_demands[building_id])):
+                        if allocated >= visit_demand:
+                            break
+                        
+                        room_id, original_packages = building_all_room_demands[building_id][i]
+                        remaining_in_room = building_room_remaining[building_id].get(room_id, 0)
+                        
+                        if remaining_in_room <= 0:
+                            continue
+                        
+                        # 只分配能完整放入的房间
+                        if remaining_in_room <= (visit_demand - allocated):
+                            can_take = remaining_in_room
+                            
+                            # 更新全局building_room_demands（用于显示）
+                            if room_id not in building_room_demands[building_id]:
+                                building_room_demands[building_id][room_id] = can_take
+                            else:
+                                building_room_demands[building_id][room_id] += can_take
+                            
+                            # 更新本路线的房间需求
+                            if room_id not in route_room_demands[building_id]:
+                                route_room_demands[building_id][room_id] = can_take
+                                rooms_in_this_visit.append(room_id)
+                            else:
+                                route_room_demands[building_id][room_id] += can_take
+                            
+                            allocated += can_take
+                            building_room_remaining[building_id][room_id] = 0
+                
+                # 第三遍：如果仍然没凑够（极端情况），允许部分分配房间
+                if allocated < visit_demand:
+                    for i in range(len(building_all_room_demands[building_id])):
+                        if allocated >= visit_demand:
+                            break
+                        
+                        room_id, original_packages = building_all_room_demands[building_id][i]
+                        remaining_in_room = building_room_remaining[building_id].get(room_id, 0)
+                        
+                        if remaining_in_room <= 0:
+                            continue
+                        
+                        # 允许部分分配：取尽可能多的包裹
+                        can_take = min(remaining_in_room, visit_demand - allocated)
+                        
+                        # 更新全局building_room_demands（用于显示）
+                        if room_id not in building_room_demands[building_id]:
+                            building_room_demands[building_id][room_id] = can_take
+                        else:
+                            building_room_demands[building_id][room_id] += can_take
+                        
+                        # 更新本路线的房间需求
+                        if room_id not in route_room_demands[building_id]:
+                            route_room_demands[building_id][room_id] = can_take
+                            rooms_in_this_visit.append(room_id)
+                        else:
+                            route_room_demands[building_id][room_id] += can_take
+                        
+                        allocated += can_take
+                        building_room_remaining[building_id][room_id] -= can_take
                 
                 # 提取楼层范围用于显示
                 if rooms_in_this_visit:
