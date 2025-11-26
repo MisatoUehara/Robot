@@ -131,7 +131,7 @@ if __name__ == "__main__":
                 C[(j,i)] = distance
             else:
                 C[i,j]=0
-    D={i:random.randint(0,10) for i in B}       #随机需求
+    D={i:random.randint(0,20) for i in B}       #随机需求
     D[0]=0                                      #仓库(0)需求为0
 
 
@@ -180,106 +180,135 @@ if __name__ == "__main__":
     num_floors = 30  # 每栋楼30层
     rooms_per_floor = 5  # 每层5个房间，单链结构；如需分支可改为 [3,2] 等
     
-    # 为每栋楼生成随机房间需求分布（将建筑需求随机分配到房间）
-    def generate_room_demands_for_building(building_id, total_demand, num_floors, rooms_per_floor):
-        """随机将建筑需求分配到各房间"""
+    # 为每栋楼生成房间需求分布：先随机生成，再按楼层排序，相近楼层分配到同一路线
+    print("\n=== 基于一阶段路线生成房间需求（随机生成后按楼层分组到相近路线）===")
+    building_room_demands = {}
+    
+    # 第一步：为每栋楼生成所有房间的随机需求分布
+    building_total_demands = {}
+    for route_idx, (route, split_demand_map) in enumerate(zip(ORIGINAL_CYCCLES, SPLIT_DEMANDS)):
+        for building_id in route:
+            if building_id == 0:
+                continue
+            if building_id not in split_demand_map:
+                continue
+            if building_id not in building_total_demands:
+                building_total_demands[building_id] = 0
+            for demand in split_demand_map[building_id]:
+                building_total_demands[building_id] += demand
+    
+    # 为每栋楼随机生成房间需求
+    building_all_room_demands = {}
+    for building_id, total_demand in building_total_demands.items():
         if total_demand <= 0:
-            return {}
+            continue
         
-        # 计算总房间数
-        if isinstance(rooms_per_floor, int):
-            total_rooms = num_floors * rooms_per_floor
-        else:
-            # 如果是列表，计算每层房间总数
-            total_rooms = num_floors * sum(rooms_per_floor)
+        print(f"\n为楼栋 {building_id} 随机生成总需求 {total_demand} 的房间分配")
         
-        # 生成所有可能的房间列表 (floor.room格式)
+        # 生成所有可能的房间列表
         all_rooms = []
         for floor in range(1, num_floors + 1):
-            if isinstance(rooms_per_floor, int):
-                num_rooms = rooms_per_floor
-            else:
-                num_rooms = sum(rooms_per_floor)
-            for room in range(1, num_rooms + 1):
-                all_rooms.append(f"{building_id}.{floor}.{room}")
-        
-        # 随机选择房间并分配需求（每个包裹最多4个单位）
-        room_demands = {}
-        remaining = total_demand
+            for room in range(1, rooms_per_floor + 1):
+                room_id = f"{building_id}.{floor}.{room}"
+                all_rooms.append(room_id)
         
         # 随机打乱房间顺序
-        import random
         random.shuffle(all_rooms)
         
-        # 分配需求到随机房间
-        for room in all_rooms:
+        # 随机分配需求到房间
+        remaining = total_demand
+        room_demands = {}
+        
+        for room_id in all_rooms:
             if remaining <= 0:
                 break
             # 每个房间随机分配1-4个包裹（不超过剩余需求）
             packages = min(random.randint(1, 4), remaining)
-            room_demands[room] = packages
+            room_demands[room_id] = packages
             remaining -= packages
         
-        return room_demands
+        # 按楼层排序房间
+        sorted_room_demands = sorted(room_demands.items(), key=lambda x: tuple(map(int, x[0].split('.'))))
+        building_all_room_demands[building_id] = sorted_room_demands
+        print(f"  生成 {len(sorted_room_demands)} 个房间，按楼层排序完成")
     
-    # 生成每栋楼的房间需求（使用拆分后的需求来分配房间）
-    # 注意：合并所有访问到同一个building_id键下，generate_networks_from_delivery_plan会按顺序分配
-    building_room_demands = {}
-    route_visit_mapping = {}  # 记录每条路线中每个楼栋的访问次数和对应的房间需求
+    # 第二步：根据路线将相近楼层的房间分配到同一路线
+    print("\n=== 将相近楼层的房间分配到各路线 ===")
+    building_room_index = {bid: 0 for bid in building_total_demands.keys()}  # 跟踪每栋楼的房间分配进度
     
-    for idx, (route, split_demand_map) in enumerate(zip(ORIGINAL_CYCCLES, SPLIT_DEMANDS)):
-        print(f"\n为路线 #{idx+1} 生成房间需求:")
-        route_visit_mapping[idx] = {}
+    for route_idx, (route, split_demand_map) in enumerate(zip(ORIGINAL_CYCCLES, SPLIT_DEMANDS)):
+        print(f"\n为路线 #{route_idx+1}: {route} 分配房间需求")
+        print(f"  楼栋拆分需求: {split_demand_map}")
         
-        for building_id, demands in split_demand_map.items():
-            if building_id != 0:
-                route_visit_mapping[idx][building_id] = []
+        if route_idx not in [item for item in range(len(ORIGINAL_CYCCLES))]:
+            continue
+        
+        # 遍历路线中的每个楼栋
+        for building_id in route:
+            if building_id == 0:  # 跳过仓库
+                continue
+            
+            # 获取该楼栋在本次访问中的需求
+            if building_id not in split_demand_map:
+                continue
+            
+            # 如果楼栋还没有初始化房间需求，先初始化
+            if building_id not in building_room_demands:
+                building_room_demands[building_id] = {}
+            
+            # split_demand_map[building_id] 是一个列表，包含该楼栋的所有拆分需求
+            demands_for_building = split_demand_map[building_id]
+            
+            # 为该楼栋的每次访问分配需求（从已排序的房间列表中按顺序取）
+            for visit_demand in demands_for_building:
+                if visit_demand <= 0:
+                    continue
                 
-                # 如果这个楼栋还没有在building_room_demands中，初始化
-                if building_id not in building_room_demands:
-                    building_room_demands[building_id] = {}
+                # 从已排序的房间列表中取出相近楼层的房间
+                allocated = 0
+                start_idx = building_room_index[building_id]
+                rooms_in_this_visit = []
                 
-                for visit_idx, demand in enumerate(demands):
-                    # 为同一楼栋的每次访问生成独立的房间需求
-                    room_demands = generate_room_demands_for_building(
-                        building_id, demand, num_floors, rooms_per_floor
-                    )
+                for i in range(start_idx, len(building_all_room_demands[building_id])):
+                    if allocated >= visit_demand:
+                        break
+                    room_id, packages = building_all_room_demands[building_id][i]
+                    can_take = min(packages, visit_demand - allocated)
                     
-                    # 合并到building_room_demands[building_id]中
-                    # room_demands已经是'building.floor.room'格式，直接累加
-                    for room, room_demand in room_demands.items():
-                        if room in building_room_demands[building_id]:
-                            building_room_demands[building_id][room] += room_demand
-                        else:
-                            building_room_demands[building_id][room] = room_demand
+                    if room_id not in building_room_demands[building_id]:
+                        building_room_demands[building_id][room_id] = can_take
+                        rooms_in_this_visit.append(room_id)
+                    else:
+                        building_room_demands[building_id][room_id] += can_take
                     
-                    route_visit_mapping[idx][building_id].append(room_demands)
-                    
-                    room_total = sum(room_demands.values())
-                    print(f"  楼栋 {building_id} (访问{visit_idx+1}): 需求={demand}, 房间总和={room_total}, 分布: {room_demands}")
-                    if room_total != demand:
-                        print(f"    ⚠️ 警告: 房间需求总和 {room_total} 不等于分配需求 {demand}!")
+                    allocated += can_take
+                    building_room_index[building_id] = i + 1
+                
+                # 提取楼层范围用于显示
+                if rooms_in_this_visit:
+                    floors = [int(r.split('.')[1]) for r in rooms_in_this_visit]
+                    floor_range = f"{min(floors)}-{max(floors)}" if len(set(floors)) > 1 else f"{floors[0]}"
+                    print(f"  楼栋 {building_id} 本次访问需求 {visit_demand}，分配到楼层 {floor_range} 的 {len(rooms_in_this_visit)} 个房间")
     
-    print("\n合并后的building_room_demands (用于network生成):")
-    for bid, rooms in building_room_demands.items():
-        total = sum(rooms.values())
-        print(f"  楼栋 {bid}: 总需求={total}, 房间分布={rooms}")
-
-
-
+    print("\n最终房间需求分配（按楼层排序）:")
+    for building_id, room_demands in building_room_demands.items():
+        print(f"  楼栋 {building_id}: {len(room_demands)} 个房间，总需求 {sum(room_demands.values())}")
+        # 按楼层排序显示前几个房间
+        sorted_rooms = sorted(room_demands.items(), key=lambda x: tuple(map(int, x[0].split('.'))))
+        print(f"    示例房间: {sorted_rooms[:5]}")
     
-    # 为每条配送路线生成物理网络（使用新生成的房间需求）
-    print("\n生成物理网络并优化...")
+    # 为每条配送路线生成物理网络
+    print("\n=== 生成物理网络（使用预分配的房间需求）===")
     networks = generate_networks_from_delivery_plan(
         delivery_plan=ORIGINAL_CYCCLES,
-        building_demands=D,  # 原始楼栋需求（仅用于确定哪些楼栋需要处理）
+        building_demands=D,  # 原始楼栋需求
         rooms_per_floor=rooms_per_floor,
         Q=4,                    # 机器人载重量
         k=5,                    # 楼层间转移成本系数
         intra_floor_weight=1,   # 楼层内边权重
         close_loop=True,        # 闭环：最后房间连回入口
         separate_buildings=True, # 每栋楼单独生成网络和优化
-        building_room_demands=building_room_demands  # 使用新生成的详细房间需求
+        building_room_demands=building_room_demands  # 传入预分配的房间需求
     )
     
     # 对每栋楼进行二阶段优化
