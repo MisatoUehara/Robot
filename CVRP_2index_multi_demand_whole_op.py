@@ -137,21 +137,41 @@ if __name__ == "__main__":
 
     #一阶段求解
     B_,C_,D_ = reform_data(B,C,D,level=1)
-    CYCCLES,obj=CVRP(B_,C_,D_)
-    sum_obj+=obj
+    CYCCLES,stage1_obj=CVRP(B_,C_,D_)
+    sum_obj+=stage1_obj
 
-    # 将cycle中的B_路径转换为原始的B路径
+    # 将cycle中的B_路径转换为原始的B路径，同时保留拆分后的需求信息
     ORIGINAL_CYCCLES = []
-    for i in CYCCLES:
+    SPLIT_DEMANDS = []  # 保存每条路线中各个节点的拆分需求
+    for cycle in CYCCLES:
         original_cycle = []
-        for node in i:
-            original_cycle.append(B_[node])  # 转换为原始楼栋编号
+        split_demand_map = {}  # {building_id: [demand1, demand2, ...]}
+        for node in cycle:
+            building_id = B_[node]
+            original_cycle.append(building_id)
+            demand = D_[node]
+            if building_id not in split_demand_map:
+                split_demand_map[building_id] = []
+            split_demand_map[building_id].append(demand)
         ORIGINAL_CYCCLES.append(original_cycle+[0])
+        SPLIT_DEMANDS.append(split_demand_map)
 
     # 结果输出,全向图路径
-    print("需求:",D)
+    print("原始需求:",D)
+    print("拆分后需求:", D_)
     print("大楼配送方案:", ORIGINAL_CYCCLES,"共%d次"%(len(ORIGINAL_CYCCLES)))
 
+    # 验证每条路线的总需求（使用拆分后的需求）
+    print("\n验证每条路线的总需求:")
+    for idx, (route, split_demand_map) in enumerate(zip(ORIGINAL_CYCCLES, SPLIT_DEMANDS)):
+        buildings_in_route = [b for b in route if b != 0]
+        total_demand = sum(sum(demands) for demands in split_demand_map.values())
+        print(f"路线 #{idx+1}: {route}")
+        print(f"  楼栋拆分需求: {split_demand_map}")
+        print(f"  路线总需求: {total_demand}")
+        if total_demand > 4:
+            print(f"  ⚠️ 警告: 本路线总需求 {total_demand} 超过容量 Q=4! (此路线包含多个楼栋)")
+        print()
 
     # 二阶段：为每个配送路线生成物理网络并求解
     print("\n=== 二阶段：楼内配送优化 ===")
@@ -202,26 +222,64 @@ if __name__ == "__main__":
         
         return room_demands
     
-    # 生成每栋楼的房间需求
+    # 生成每栋楼的房间需求（使用拆分后的需求来分配房间）
+    # 注意：合并所有访问到同一个building_id键下，generate_networks_from_delivery_plan会按顺序分配
     building_room_demands = {}
-    for building_id, demand in D.items():
-        if building_id != 0 and demand > 0:
-            building_room_demands[building_id] = generate_room_demands_for_building(
-                building_id, demand, num_floors, rooms_per_floor
-            )
-            print(f"楼栋 {building_id} 房间需求分布: {building_room_demands[building_id]}")
+    route_visit_mapping = {}  # 记录每条路线中每个楼栋的访问次数和对应的房间需求
     
-    # 为每条配送路线生成物理网络（每栋楼单独优化）
+    for idx, (route, split_demand_map) in enumerate(zip(ORIGINAL_CYCCLES, SPLIT_DEMANDS)):
+        print(f"\n为路线 #{idx+1} 生成房间需求:")
+        route_visit_mapping[idx] = {}
+        
+        for building_id, demands in split_demand_map.items():
+            if building_id != 0:
+                route_visit_mapping[idx][building_id] = []
+                
+                # 如果这个楼栋还没有在building_room_demands中，初始化
+                if building_id not in building_room_demands:
+                    building_room_demands[building_id] = {}
+                
+                for visit_idx, demand in enumerate(demands):
+                    # 为同一楼栋的每次访问生成独立的房间需求
+                    room_demands = generate_room_demands_for_building(
+                        building_id, demand, num_floors, rooms_per_floor
+                    )
+                    
+                    # 合并到building_room_demands[building_id]中
+                    # room_demands已经是'building.floor.room'格式，直接累加
+                    for room, room_demand in room_demands.items():
+                        if room in building_room_demands[building_id]:
+                            building_room_demands[building_id][room] += room_demand
+                        else:
+                            building_room_demands[building_id][room] = room_demand
+                    
+                    route_visit_mapping[idx][building_id].append(room_demands)
+                    
+                    room_total = sum(room_demands.values())
+                    print(f"  楼栋 {building_id} (访问{visit_idx+1}): 需求={demand}, 房间总和={room_total}, 分布: {room_demands}")
+                    if room_total != demand:
+                        print(f"    ⚠️ 警告: 房间需求总和 {room_total} 不等于分配需求 {demand}!")
+    
+    print("\n合并后的building_room_demands (用于network生成):")
+    for bid, rooms in building_room_demands.items():
+        total = sum(rooms.values())
+        print(f"  楼栋 {bid}: 总需求={total}, 房间分布={rooms}")
+
+
+
+    
+    # 为每条配送路线生成物理网络（使用新生成的房间需求）
+    print("\n生成物理网络并优化...")
     networks = generate_networks_from_delivery_plan(
         delivery_plan=ORIGINAL_CYCCLES,
-        building_demands=D,
+        building_demands=D,  # 原始楼栋需求（仅用于确定哪些楼栋需要处理）
         rooms_per_floor=rooms_per_floor,
         Q=4,                    # 机器人载重量
         k=5,                    # 楼层间转移成本系数
         intra_floor_weight=1,   # 楼层内边权重
         close_loop=True,        # 闭环：最后房间连回入口
         separate_buildings=True, # 每栋楼单独生成网络和优化
-        building_room_demands=building_room_demands  # 传入详细房间需求
+        building_room_demands=building_room_demands  # 使用新生成的详细房间需求
     )
     
     # 对每栋楼进行二阶段优化
@@ -234,12 +292,22 @@ if __name__ == "__main__":
             print("无房间需求，跳过")
             continue
         
-        # 可选：修改特定节点的边权重（示例：增加某些节点的穿行成本）
-        # nodes_to_modify = ['3.2', '3.3']
-        # for node in nodes_to_modify:
-        #     for (u, v) in list(c.keys()):
-        #         if u == node or v == node:
-        #             c[(u, v)] = 10
+        # 根据building_id修改特定节点权重
+        # 节点格式：'floor.room'（如 '5.1' 表示5层1号房间）
+        if building_id == 1:
+            nodes_to_modify = ['1.1', '2.1', '3.1','4.1', '15.2', '20.1','5.2', '10.2', '25.1']
+        elif building_id == 3:
+            nodes_to_modify = ['15.2', '25.1']
+        elif building_id == 5:
+            nodes_to_modify = ['10.3']
+        else:
+            nodes_to_modify = []  # 其他楼栋不修改
+        
+        # 应用节点权重修改
+        for node in nodes_to_modify:
+            for (u, v) in list(c.keys()):
+                if u == node or v == node:
+                    c[(u, v)] = 10
         
         # 二阶段求解
         b_, c_, d_ = reform_data(b, c, d, level=2)
@@ -280,4 +348,4 @@ if __name__ == "__main__":
         print(f"本次配送楼内距离: {obj}")
     
     sum_obj += stage2_total
-    print(f"\n=== 总配送距离: {sum_obj} (一阶段: {obj}, 二阶段: {stage2_total}) ===")
+    print(f"\n=== 总配送距离: {sum_obj} (一阶段: {stage1_obj}, 二阶段: {stage2_total}) ===")
