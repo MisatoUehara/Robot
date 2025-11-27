@@ -3,9 +3,40 @@ import math,random,networkx
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
-from data_inputs import generate_networks_from_delivery_plan
 
-random.seed(42)  # Change this number to get different random results
+# ============================================================================
+# 配置参数 / Configuration Parameters
+# ============================================================================
+RANDOM_SEED = 42                # 随机种子 / Random seed for reproducibility
+Q = 4                           # 机器人载重量 / Robot capacity (packages)
+
+# 一阶段参数 / Stage 1 Parameters (Building-level delivery)
+NUM_BUILDINGS = 5              # 楼栋数量（不包括仓库）/ Number of buildings (excluding depot)
+MIN_BUILDING_DISTANCE = 20      # 楼栋间最小距离 / Min distance between buildings
+MAX_BUILDING_DISTANCE = 50      # 楼栋间最大距离 / Max distance between buildings
+MIN_BUILDING_DEMAND = 0         # 楼栋最小需求 / Min demand per building
+MAX_BUILDING_DEMAND = 20        # 楼栋最大需求 / Max demand per building
+
+# 二阶段参数 / Stage 2 Parameters (Room-level delivery)
+NUM_FLOORS = 5                  # 每栋楼层数 / Number of floors per building
+ROOMS_PER_FLOOR = 3             # 每层房间数 / Number of rooms per floor
+FLOOR_DISTANCE = 5              # 楼层间距离（垂直移动成本）/ Distance between floors (vertical cost)
+ROOM_DISTANCE = 1               # 同层房间间距离（水平移动成本）/ Distance between rooms on same floor (horizontal cost)
+
+# 房间需求分配概率 / Room demand allocation probability
+PROB_1_PACKAGE = 0.70           # 1个包裹的概率 / Probability of 1 package
+PROB_2_PACKAGES = 0.20          # 2个包裹的概率 / Probability of 2 packages (cumulative: 0.90)
+PROB_3_PACKAGES = 0.07          # 3个包裹的概率 / Probability of 3 packages (cumulative: 0.97)
+# 其余概率为4个包裹 / Remaining probability is for 4 packages
+
+# 可视化参数 / Visualization Parameters
+ENABLE_VISUALIZATION = False     # 启用可视化 / Enable visualization
+SHOW_STAGE1_VIS = True          # 显示一阶段可视化 / Show stage 1 visualization
+SHOW_STAGE2_VIS = True          # 显示二阶段可视化 / Show stage 2 visualization
+MAX_STAGE2_BUILDINGS_VIS = 3    # 最多显示几个楼栋的二阶段路径 / Max buildings to visualize in stage 2
+# ============================================================================
+
+random.seed(RANDOM_SEED)  # Change this number to get different random results
 
 def reform_data(B,C,D,level):
 
@@ -56,7 +87,7 @@ def reform_data(B,C,D,level):
     return B_,C_,D_
 
 #CVRP模型,一阶段处理楼栋配送,二阶段处理楼内配送
-def CVRP(B,C,D,Q=4):
+def CVRP(B,C,D,Q=Q):
     V = [i for i in range(math.ceil(sum(D.values())/Q))]
     #约束5,子回路消除和载重约束约束,作为lazy constraint动态加入
     def Cut(model,where):
@@ -116,22 +147,176 @@ def CVRP(B,C,D,Q=4):
     return cycles,MD.ObjVal
 
 
+def visualize_stage1_routes(B, C, D, ORIGINAL_CYCCLES, building_positions=None):
+    """可视化一阶段楼栋配送路径"""
+    if not ENABLE_VISUALIZATION or not SHOW_STAGE1_VIS:
+        return
+    
+    # 如果没有提供位置，使用随机布局
+    if building_positions is None:
+        # 使用距离矩阵创建图
+        G = nx.Graph()
+        G.add_nodes_from(B)
+        for i in B:
+            for j in B:
+                if i < j and i in C and (i, j) in C:
+                    G.add_edge(i, j, weight=C[(i, j)])
+        building_positions = nx.spring_layout(G, k=2, iterations=50, seed=RANDOM_SEED)
+    
+    # 为每条路线使用不同颜色
+    colors = plt.cm.tab20(np.linspace(0, 1, len(ORIGINAL_CYCCLES)))
+    
+    plt.figure(figsize=(14, 10))
+    
+    # 绘制所有节点
+    depot_pos = building_positions[0]
+    plt.scatter([depot_pos[0]], [depot_pos[1]], s=800, c='red', marker='s', 
+                label='Depot', zorder=5, edgecolors='black', linewidths=2)
+    
+    for building in B[1:]:
+        pos = building_positions[building]
+        plt.scatter([pos[0]], [pos[1]], s=500, c='lightblue', marker='o', 
+                   zorder=4, edgecolors='black', linewidths=1.5)
+        plt.text(pos[0], pos[1], f'{building}\n({D[building]})', 
+                ha='center', va='center', fontsize=10, fontweight='bold')
+    
+    # 绘制每条路线
+    for idx, (route, color) in enumerate(zip(ORIGINAL_CYCCLES, colors)):
+        for i in range(len(route) - 1):
+            start, end = route[i], route[i+1]
+            start_pos = building_positions[start]
+            end_pos = building_positions[end]
+            
+            # 绘制箭头
+            dx = end_pos[0] - start_pos[0]
+            dy = end_pos[1] - start_pos[1]
+            plt.arrow(start_pos[0], start_pos[1], dx*0.85, dy*0.85,
+                     head_width=0.03, head_length=0.02, fc=color, ec=color,
+                     alpha=0.6, length_includes_head=True, zorder=3)
+    
+    plt.text(depot_pos[0], depot_pos[1], 'Depot\n0', 
+            ha='center', va='center', fontsize=11, fontweight='bold', color='white')
+    
+    plt.title(f'Stage 1: Building Delivery Routes (Q={Q}, Total Routes: {len(ORIGINAL_CYCCLES)})', 
+              fontsize=14, fontweight='bold')
+    plt.legend(loc='upper right')
+    plt.axis('equal')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig('stage1_building_routes.png', dpi=150, bbox_inches='tight')
+    print("  → Stage 1 visualization saved as 'stage1_building_routes.png'")
+    plt.show()
+
+
+def visualize_stage2_routes(building_id, b, a, c, d, physical_paths, original_cycles, cycle_demands):
+    """可视化二阶段楼内房间配送路径"""
+    if not ENABLE_VISUALIZATION or not SHOW_STAGE2_VIS:
+        return
+    
+    # 创建图
+    G = nx.Graph()
+    G.add_nodes_from(b)
+    G.add_edges_from(a)
+    for (i, j) in a:
+        G[i][j]['weight'] = c[(i, j)]
+    
+    # 计算节点位置：楼层垂直排列，房间水平排列
+    pos = {}
+    for node in b:
+        if node == '1.0':
+            pos[node] = (0, 0)
+        else:
+            parts = node.split('.')
+            floor = int(parts[0])
+            room = int(parts[1])
+            
+            if room == 0:  # 楼层入口
+                pos[node] = (0, floor * 2)
+            else:  # 房间
+                pos[node] = (room * 1.5, floor * 2)
+    
+    # 创建图形
+    fig, ax = plt.subplots(figsize=(12, 10))
+    
+    # 绘制所有边（物理网络）
+    for (u, v) in a:
+        x = [pos[u][0], pos[v][0]]
+        y = [pos[u][1], pos[v][1]]
+        ax.plot(x, y, 'gray', alpha=0.3, linewidth=1, zorder=1)
+    
+    # 为每条路线使用不同颜色
+    colors = plt.cm.Set3(np.linspace(0, 1, len(physical_paths)))
+    
+    # 绘制每条配送路径
+    for idx, (path, color, demand) in enumerate(zip(physical_paths, colors, cycle_demands)):
+        for i in range(len(path) - 1):
+            start, end = path[i], path[i+1]
+            x = [pos[start][0], pos[end][0]]
+            y = [pos[start][1], pos[end][1]]
+            ax.plot(x, y, color=color, linewidth=3, alpha=0.7, 
+                   label=f'Trip {idx+1} (Load: {demand})' if i == 0 else '', zorder=2)
+            
+            # 添加箭头
+            if i < len(path) - 2:  # 不在最后一段添加箭头
+                mid_x = (x[0] + x[1]) / 2
+                mid_y = (y[0] + y[1]) / 2
+                dx = x[1] - x[0]
+                dy = y[1] - y[0]
+                ax.annotate('', xy=(mid_x + dx*0.1, mid_y + dy*0.1), 
+                           xytext=(mid_x - dx*0.1, mid_y - dy*0.1),
+                           arrowprops=dict(arrowstyle='->', color=color, lw=2), zorder=3)
+    
+    # 绘制节点
+    for node in b:
+        x, y = pos[node]
+        if node == '1.0':  # 入口
+            ax.scatter(x, y, s=500, c='red', marker='s', zorder=5, edgecolors='black', linewidths=2)
+            ax.text(x, y-0.3, 'Entrance', ha='center', fontsize=9, fontweight='bold')
+        elif node.endswith('.0'):  # 楼层入口
+            ax.scatter(x, y, s=300, c='orange', marker='d', zorder=4, edgecolors='black', linewidths=1.5)
+            ax.text(x-0.3, y, f'F{node.split(".")[0]}', ha='right', fontsize=8)
+        else:  # 房间
+            demand = d.get(node, 0)
+            if demand > 0:
+                ax.scatter(x, y, s=400, c='lightgreen', marker='o', zorder=4, 
+                          edgecolors='darkgreen', linewidths=2)
+                ax.text(x, y, f'{node}\n[{demand}]', ha='center', va='center', 
+                       fontsize=7, fontweight='bold')
+            else:
+                ax.scatter(x, y, s=200, c='lightgray', marker='o', zorder=3, 
+                          edgecolors='gray', linewidths=1)
+                ax.text(x, y+0.3, node, ha='center', fontsize=6, color='gray')
+    
+    ax.set_title(f'Stage 2: Building {building_id} Room Delivery Routes\n'
+                f'Total Demand: {sum(d.values())}, Trips: {len(physical_paths)}, Q={Q}',
+                fontsize=12, fontweight='bold')
+    ax.legend(loc='upper right', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.set_xlabel('Room Position', fontsize=10)
+    ax.set_ylabel('Floor', fontsize=10)
+    ax.axis('equal')
+    plt.tight_layout()
+    plt.savefig(f'stage2_building{building_id}_routes.png', dpi=150, bbox_inches='tight')
+    print(f"  → Building {building_id} visualization saved as 'stage2_building{building_id}_routes.png'")
+    plt.show()
+
+
 if __name__ == "__main__":
     sum_obj=0
 
     # input,一阶段都用大写字母,二阶段都用小写字母,主要参数B,C,D,a,b,c,d
     # 一阶段数据
-    B=[i for i in range(10)]                    #仓库(0)和楼栋编号
+    B=[i for i in range(NUM_BUILDINGS + 1)]     #仓库(0)和楼栋编号
     C={}                                        #距离
     for i in B:
         for j in B:
             if i != j:
-                distance = random.randint(20, 50)
+                distance = random.randint(MIN_BUILDING_DISTANCE, MAX_BUILDING_DISTANCE)
                 C[(i,j)] = distance
                 C[(j,i)] = distance
             else:
                 C[i,j]=0
-    D={i:random.randint(0,20) for i in B}       #随机需求
+    D={i:random.randint(MIN_BUILDING_DEMAND, MAX_BUILDING_DEMAND) for i in B}  #随机需求
     D[0]=0                                      #仓库(0)需求为0
 
 
@@ -173,333 +358,146 @@ if __name__ == "__main__":
             print(f"  ⚠️ 警告: 本路线总需求 {total_demand} 超过容量 Q=4! (此路线包含多个楼栋)")
         print()
 
-    # 二阶段：为每个配送路线生成物理网络并求解
+    # 可视化一阶段路径
+    if ENABLE_VISUALIZATION and SHOW_STAGE1_VIS:
+        print("\n=== 生成一阶段可视化 ===")
+        visualize_stage1_routes(B, C, D, ORIGINAL_CYCCLES)
+
+    # 二阶段：根据原始需求生成房间需求并优化
     print("\n=== 二阶段：楼内配送优化 ===")
+    print(f"配置: Q={Q}, 楼层数={NUM_FLOORS}, 每层房间数={ROOMS_PER_FLOOR}")
     
-    # 配置：所有楼层使用相同的房间布局
-    num_floors = 30  # 每栋楼30层
-    rooms_per_floor = 5  # 每层5个房间，单链结构；如需分支可改为 [3,2] 等
+    stage2_total = 0
+    vis_count = 0  # 用于限制可视化的楼栋数量
     
-    # 为每栋楼生成房间需求分布：先随机生成，再按楼层排序，相近楼层分配到同一路线
-    print("\n=== 基于一阶段路线生成房间需求（随机生成后按楼层分组到相近路线）===")
-    building_room_demands = {}
-    
-    # 第一步：为每栋楼生成所有房间的随机需求分布
-    building_total_demands = {}
-    for route_idx, (route, split_demand_map) in enumerate(zip(ORIGINAL_CYCCLES, SPLIT_DEMANDS)):
-        for building_id in route:
-            if building_id == 0:
-                continue
-            if building_id not in split_demand_map:
-                continue
-            if building_id not in building_total_demands:
-                building_total_demands[building_id] = 0
-            for demand in split_demand_map[building_id]:
-                building_total_demands[building_id] += demand
-    
-    # 为每栋楼随机生成房间需求
-    building_all_room_demands = {}
-    for building_id, total_demand in building_total_demands.items():
-        if total_demand <= 0:
+    # 为每栋有需求的楼栋生成房间需求并优化
+    for building_id in range(1, len(B)):
+        if D[building_id] <= 0:
             continue
         
-        print(f"\n为楼栋 {building_id} 随机生成总需求 {total_demand} 的房间分配")
+        total_demand = D[building_id]
+        print(f"\n--- 楼栋 {building_id} (总需求: {total_demand}) ---")
         
-        # 生成所有可能的房间列表
-        all_rooms = []
-        for floor in range(1, num_floors + 1):
-            for room in range(1, rooms_per_floor + 1):
-                room_id = f"{building_id}.{floor}.{room}"
-                all_rooms.append(room_id)
+        # 生成物理网络：楼层链式结构，每层有多个房间
+        a = []  # 边
+        b = ['1.0']  # 节点，从入口开始
         
-        # 随机打乱房间顺序
+        # 为每层生成节点和边
+        for floor in range(1, NUM_FLOORS + 1):
+            floor_entrance = f"{floor}.0"
+            b.append(floor_entrance)
+            
+            # 连接入口到楼层入口（或上一层到当前层）
+            if floor == 1:
+                a.append(('1.0', floor_entrance))
+            else:
+                prev_floor = f"{floor-1}.0"
+                a.append((prev_floor, floor_entrance))
+            
+            # 为该层生成房间
+            for room in range(1, ROOMS_PER_FLOOR + 1):
+                room_id = f"{floor}.{room}"
+                b.append(room_id)
+                if room == 1:
+                    a.append((floor_entrance, room_id))
+                else:
+                    prev_room = f"{floor}.{room-1}"
+                    a.append((prev_room, room_id))
+        
+        # 设置边的权重：楼层间距离为5，同层房间间距离为1
+        c = {}
+        for (u, v) in a:
+            # 判断是否为楼层间的边
+            u_floor = int(u.split('.')[0]) if u != '1.0' else 1
+            v_floor = int(v.split('.')[0])
+            if u == '1.0' or (u.endswith('.0') and v.endswith('.0')):
+                c[(u, v)] = FLOOR_DISTANCE  # 楼层间距离
+            else:
+                c[(u, v)] = ROOM_DISTANCE  # 同层房间间距离
+        
+        # 生成房间需求：随机分配到各个房间
+        all_rooms = [node for node in b if not node.endswith('.0') and node != '1.0']
         random.shuffle(all_rooms)
         
-        # 随机分配需求到房间
+        d = {}
         remaining = total_demand
-        room_demands = {}
-        
         for room_id in all_rooms:
             if remaining <= 0:
                 break
-            # 每个房间随机分配1-4个包裹，大部分房间只有1个包裹
-            # 概率分布：1包裹(70%), 2包裹(20%), 3包裹(7%), 4包裹(3%)
+            # 每个房间随机分配1-4个包裹
             rand_val = random.random()
-            if rand_val < 0.70:
+            if rand_val < PROB_1_PACKAGE:
                 packages = 1
-            elif rand_val < 0.90:
+            elif rand_val < PROB_1_PACKAGE + PROB_2_PACKAGES:
                 packages = 2
-            elif rand_val < 0.97:
+            elif rand_val < PROB_1_PACKAGE + PROB_2_PACKAGES + PROB_3_PACKAGES:
                 packages = 3
             else:
                 packages = 4
-            packages = min(packages, remaining)  # 不超过剩余需求
-            room_demands[room_id] = packages
-            remaining -= packages
+            packages = min(packages, remaining)
+            if packages > 0:
+                d[room_id] = packages
+                remaining -= packages
         
-        # 如果还有剩余需求（由于概率分配可能导致），分配到最后一个房间
-        if remaining > 0 and room_demands:
-            last_room = list(room_demands.keys())[-1]
-            room_demands[last_room] += remaining
-            remaining = 0
+        # 如果还有剩余需求，分配到最后一个房间
+        if remaining > 0 and d:
+            last_room = list(d.keys())[-1]
+            d[last_room] += remaining
         
-        # 按楼层排序房间
-        sorted_room_demands = sorted(room_demands.items(), key=lambda x: tuple(map(int, x[0].split('.'))))
-        building_all_room_demands[building_id] = sorted_room_demands
-        total_allocated = sum(demand for _, demand in sorted_room_demands)
-        print(f"  生成 {len(sorted_room_demands)} 个房间，按楼层排序完成（总需求: {total_allocated}）")
-    
-    # 第二步：根据路线将相近楼层的房间分配到同一路线
-    print("\n=== 将相近楼层的房间分配到各路线 ===")
-    building_room_index = {bid: 0 for bid in building_total_demands.keys()}  # 跟踪每栋楼的房间分配进度
-    building_room_remaining = {}  # 跟踪每栋楼每个房间的剩余包裹数
-    
-    # 初始化剩余包裹数
-    for building_id, sorted_demands in building_all_room_demands.items():
-        building_room_remaining[building_id] = {room_id: packages for room_id, packages in sorted_demands}
-    
-    # 创建per-route的房间需求结构
-    route_building_room_demands = []  # List of dicts: [{building_id: {room: demand}, ...}, ...]
-    
-    for route_idx, (route, split_demand_map) in enumerate(zip(ORIGINAL_CYCCLES, SPLIT_DEMANDS)):
-        print(f"\n为路线 #{route_idx+1}: {route} 分配房间需求")
-        print(f"  楼栋拆分需求: {split_demand_map}")
+        print(f"房间需求: {d}")
         
-        route_room_demands = {}  # 这条路线的房间需求: {building_id: {room: demand}}
-        
-        if route_idx not in [item for item in range(len(ORIGINAL_CYCCLES))]:
-            route_building_room_demands.append(route_room_demands)
+        if not d:
+            print("无房间需求，跳过")
             continue
         
-        # 遍历路线中的每个楼栋
-        for building_id in route:
-            if building_id == 0:  # 跳过仓库
-                continue
-            
-            # 获取该楼栋在本次访问中的需求
-            if building_id not in split_demand_map:
-                continue
-            
-            # 如果楼栋还没有初始化房间需求，先初始化
-            if building_id not in building_room_demands:
-                building_room_demands[building_id] = {}
-            
-            if building_id not in route_room_demands:
-                route_room_demands[building_id] = {}
-            
-            # split_demand_map[building_id] 是一个列表，包含该楼栋的所有拆分需求
-            demands_for_building = split_demand_map[building_id]
-            
-            # 为该楼栋的每次访问分配需求（从已排序的房间列表中按顺序取）
-            for visit_demand in demands_for_building:
-                if visit_demand <= 0:
-                    continue
-                
-                # 从已排序的房间列表中取出相近楼层的房间
-                # 重要：每个房间的包裹必须在同一次访问中全部配送完，不能拆分到多次访问
-                allocated = 0
-                rooms_in_this_visit = []
-                
-                # 第一遍：从当前索引开始，尽量分配连续的房间
-                i = building_room_index[building_id]
-                while i < len(building_all_room_demands[building_id]) and allocated < visit_demand:
-                    room_id, original_packages = building_all_room_demands[building_id][i]
-                    remaining_in_room = building_room_remaining[building_id].get(room_id, 0)
-                    
-                    if remaining_in_room <= 0:
-                        i += 1
-                        continue
-                    
-                    # 只有当这个房间的所有包裹都能放入本次访问时，才分配这个房间
-                    if remaining_in_room <= (visit_demand - allocated):
-                        # 可以完整分配这个房间的所有包裹
-                        can_take = remaining_in_room
-                        
-                        # 更新全局building_room_demands（用于显示）
-                        if room_id not in building_room_demands[building_id]:
-                            building_room_demands[building_id][room_id] = can_take
-                        else:
-                            building_room_demands[building_id][room_id] += can_take
-                        
-                        # 更新本路线的房间需求
-                        if room_id not in route_room_demands[building_id]:
-                            route_room_demands[building_id][room_id] = can_take
-                            rooms_in_this_visit.append(room_id)
-                        else:
-                            route_room_demands[building_id][room_id] += can_take
-                        
-                        allocated += can_take
-                        building_room_remaining[building_id][room_id] = 0
-                        
-                        # 更新索引：移动到下一个未分配的房间
-                        building_room_index[building_id] = i + 1
-                    
-                    i += 1
-                
-                # 第二遍：如果还没凑够，回到开头寻找之前跳过的房间
-                if allocated < visit_demand:
-                    for i in range(len(building_all_room_demands[building_id])):
-                        if allocated >= visit_demand:
-                            break
-                        
-                        room_id, original_packages = building_all_room_demands[building_id][i]
-                        remaining_in_room = building_room_remaining[building_id].get(room_id, 0)
-                        
-                        if remaining_in_room <= 0:
-                            continue
-                        
-                        # 只分配能完整放入的房间
-                        if remaining_in_room <= (visit_demand - allocated):
-                            can_take = remaining_in_room
-                            
-                            # 更新全局building_room_demands（用于显示）
-                            if room_id not in building_room_demands[building_id]:
-                                building_room_demands[building_id][room_id] = can_take
-                            else:
-                                building_room_demands[building_id][room_id] += can_take
-                            
-                            # 更新本路线的房间需求
-                            if room_id not in route_room_demands[building_id]:
-                                route_room_demands[building_id][room_id] = can_take
-                                rooms_in_this_visit.append(room_id)
-                            else:
-                                route_room_demands[building_id][room_id] += can_take
-                            
-                            allocated += can_take
-                            building_room_remaining[building_id][room_id] = 0
-                
-                # 第三遍：如果仍然没凑够（极端情况），允许部分分配房间
-                if allocated < visit_demand:
-                    for i in range(len(building_all_room_demands[building_id])):
-                        if allocated >= visit_demand:
-                            break
-                        
-                        room_id, original_packages = building_all_room_demands[building_id][i]
-                        remaining_in_room = building_room_remaining[building_id].get(room_id, 0)
-                        
-                        if remaining_in_room <= 0:
-                            continue
-                        
-                        # 允许部分分配：取尽可能多的包裹
-                        can_take = min(remaining_in_room, visit_demand - allocated)
-                        
-                        # 更新全局building_room_demands（用于显示）
-                        if room_id not in building_room_demands[building_id]:
-                            building_room_demands[building_id][room_id] = can_take
-                        else:
-                            building_room_demands[building_id][room_id] += can_take
-                        
-                        # 更新本路线的房间需求
-                        if room_id not in route_room_demands[building_id]:
-                            route_room_demands[building_id][room_id] = can_take
-                            rooms_in_this_visit.append(room_id)
-                        else:
-                            route_room_demands[building_id][room_id] += can_take
-                        
-                        allocated += can_take
-                        building_room_remaining[building_id][room_id] -= can_take
-                
-                # 提取楼层范围用于显示
-                if rooms_in_this_visit:
-                    floors = [int(r.split('.')[1]) for r in rooms_in_this_visit]
-                    floor_range = f"{min(floors)}-{max(floors)}" if len(set(floors)) > 1 else f"{floors[0]}"
-                    print(f"  楼栋 {building_id} 本次访问需求 {visit_demand}，分配到楼层 {floor_range} 的 {len(rooms_in_this_visit)} 个房间")
+        # 二阶段求解
+        b_, c_, d_ = reform_data(b, c, d, level=2)
+        cycles, obj = CVRP(b_, c_, d_, Q=Q)
+        stage2_total += obj
         
-        route_building_room_demands.append(route_room_demands)
-    
-    print("\n最终房间需求分配（按楼层排序）:")
-    for building_id, room_demands in building_room_demands.items():
-        print(f"  楼栋 {building_id}: {len(room_demands)} 个房间，总需求 {sum(room_demands.values())}")
-        # 按楼层排序显示前几个房间
-        sorted_rooms = sorted(room_demands.items(), key=lambda x: tuple(map(int, x[0].split('.'))))
-        print(f"    示例房间: {sorted_rooms[:5]}")
-    
-    # 为每条配送路线生成物理网络
-    print("\n=== 生成物理网络（使用预分配的房间需求）===")
-    
-    # 为每条路线单独生成网络，使用对应的房间需求
-    stage2_total = 0
-    network_count = 0
-    
-    for route_idx, (route, route_room_demands_dict) in enumerate(zip(ORIGINAL_CYCCLES, route_building_room_demands)):
-        # 为这条路线生成网络
-        networks = generate_networks_from_delivery_plan(
-            delivery_plan=[route],  # 只处理当前这一条路线
-            building_demands=D,  # 原始楼栋需求
-            rooms_per_floor=rooms_per_floor,
-            Q=4,                    # 机器人载重量
-            k=5,                    # 楼层间转移成本系数
-            intra_floor_weight=1,   # 楼层内边权重
-            close_loop=True,        # 闭环：最后房间连回入口
-            separate_buildings=True, # 每栋楼单独生成网络和优化
-            building_room_demands=route_room_demands_dict  # 使用这条路线特定的房间需求
-        )
+        # 结果输出：全向图路径
+        original_cycles = []
+        cycle_demands = []
+        for i in cycles:
+            original_cycle = []
+            trip_demand = 0
+            for node in i:
+                original_cycle.append(b_[node])
+                if node != 0:  # 不计算depot
+                    trip_demand += d_[node]
+            original_cycles.append(original_cycle + ['1.0'])
+            cycle_demands.append(trip_demand)
         
-        # 对这条路线的每栋楼进行二阶段优化
-        for net_route_idx, net_route, building_id, a, b, c, d in networks:
-            actual_route_idx = route_idx + 1  # 因为索引从0开始，显示时+1
-            print(f"\n--- 配送 #{actual_route_idx}: 路线 {route}, 楼栋 {building_id} ---")
-            print(f"房间需求: {d}")
-            
-            if not d:
-                print("无房间需求，跳过")
-                continue
-            
-            # 根据building_id修改特定节点权重
-            # 节点格式：'floor.room'（如 '5.1' 表示5层1号房间）
-            if building_id == 1:
-                nodes_to_modify = ['1.1', '2.1', '3.1','4.1', '15.2', '20.1','5.2', '10.2', '25.1']
-            elif building_id == 3:
-                nodes_to_modify = ['15.2', '25.1']
-            elif building_id == 5:
-                nodes_to_modify = ['10.3']
-            else:
-                nodes_to_modify = []  # 其他楼栋不修改
-            
-            # 应用节点权重修改
-            for node in nodes_to_modify:
-                for (u, v) in list(c.keys()):
-                    if u == node or v == node:
-                        c[(u, v)] = 10
-            
-            # 二阶段求解
-            b_, c_, d_ = reform_data(b, c, d, level=2)
-            cycles, obj = CVRP(b_, c_, d_)
-            stage2_total += obj
-            network_count += 1
-            
-            # 结果输出：全向图路径
-            original_cycles = []
-            for i in cycles:
-                original_cycle = []
-                for node in i:
-                    original_cycle.append(b_[node])
-                original_cycles.append(original_cycle + ['1.0'])
-            
-            print(f"楼内全向图配送方案: {original_cycles}")
-            
-            # 结果输出：将全向图路径转换为物理网络路径
-            physical_path = []
-            G = nx.Graph()
-            G.add_nodes_from(b)
-            G.add_edges_from(a)
-            for (i, j) in a:
-                G[i][j]['weight'] = c[(i, j)]
-            
-            for cycle in original_cycles:
-                detailed_path = []
-                for i in range(len(cycle) - 1):
-                    start = cycle[i]
-                    end = cycle[i + 1]
-                    segment_path = nx.shortest_path(G, start, end, weight='weight')
-                    if i == 0:
-                        detailed_path.extend(segment_path)
-                    else:
-                        detailed_path.extend(segment_path[1:])
-                physical_path.append(detailed_path)
-            
-            print(f"楼内物理网络配送方案: {physical_path}")
-            print(f"本次配送楼内距离: {obj}")
+        print(f"楼内全向图配送方案: {original_cycles}")
+        print(f"每趟载重: {cycle_demands} (Q={Q})")
+        
+        # 结果输出：将全向图路径转换为物理网络路径
+        physical_path = []
+        G = nx.Graph()
+        G.add_nodes_from(b)
+        G.add_edges_from(a)
+        for (i, j) in a:
+            G[i][j]['weight'] = c[(i, j)]
+        
+        for cycle in original_cycles:
+            detailed_path = []
+            for i in range(len(cycle) - 1):
+                start = cycle[i]
+                end = cycle[i + 1]
+                segment_path = nx.shortest_path(G, start, end, weight='weight')
+                if i == 0:
+                    detailed_path.extend(segment_path)
+                else:
+                    detailed_path.extend(segment_path[1:])
+            physical_path.append(detailed_path)
+        
+        print(f"楼内物理网络配送方案: {physical_path}")
+        print(f"本次配送楼内距离: {obj}")
+        
+        # 可视化二阶段路径（限制可视化的楼栋数量）
+        if ENABLE_VISUALIZATION and SHOW_STAGE2_VIS and vis_count < MAX_STAGE2_BUILDINGS_VIS:
+            visualize_stage2_routes(building_id, b, a, c, d, physical_path, original_cycles, cycle_demands)
+            vis_count += 1
     
     sum_obj += stage2_total
     print(f"\n=== 总配送距离: {sum_obj} (一阶段: {stage1_obj}, 二阶段: {stage2_total}) ===")
