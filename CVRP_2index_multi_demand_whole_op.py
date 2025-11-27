@@ -87,9 +87,8 @@ def reform_data(B,C,D,level):
     return B_,C_,D_
 
 #CVRP模型,一阶段处理楼栋配送,二阶段处理楼内配送
-def CVRP(B,C,D,Q=Q):
+def CVRP(B,C,D,level,Q=Q):
     V = [i for i in range(math.ceil(sum(D.values())/Q))]
-    #约束5,子回路消除和载重约束约束,作为lazy constraint动态加入
     def Cut(model,where):
         if where == GRB.Callback.MIPSOL:
             edges = [(i,j) for (i,j) in C if model.cbGetSolution(x[i,j]) > 0.5]
@@ -97,12 +96,25 @@ def CVRP(B,C,D,Q=Q):
             G.add_edges_from(edges)
 
             cycles = list(networkx.simple_cycles(G))
-            # print("Cycles (lazy):", cycles)
+            #约束5,子回路消除和载重约束约束,作为lazy constraint动态加入
             for S in cycles:
                 S = [i for i in S if i != 0]
                 if len(S) > 1: #理论上可以不加这句,但是会导致在出现类似[0,1]的回路gurobi的数值问题
                     #约束5,子回路消除和载重约束约束,作为lazy constraint动态加入,消除子回路和超载回路
                     model.cbLazy(quicksum(x[i,j] for i in B if i not in S for j in S if i!=j) >= math.ceil(sum(D[i] for i in S) / Q))
+            #约束6,非满载回路合并约束,仅对level2模型启用
+            if level == 2:
+                non_full_cycle=[]
+                for S in cycles:
+                    load = sum(D[node] for node in S if node != 0)
+                    if load < Q:
+                        non_full_cycle.append(S)
+                if len(non_full_cycle)>=2:
+                    a=non_full_cycle[0]
+                    b=non_full_cycle[1]
+                    #约束6,非满载回路合并约束,仅对level2模型启用,作为lazy constraint动态加入,消除多条非满载回路
+                    model.cbLazy(quicksum(x[a[i],a[i+1]] for i in range(len(a)-1))+quicksum(x[b[i],b[i+1]] for i in range(len(b)-1))<=len(a)+len(b)-3)
+
     MD = Model()
 
     x  = MD.addVars([(i,j) for (i,j) in C], vtype=GRB.BINARY)
@@ -322,7 +334,7 @@ if __name__ == "__main__":
 
     #一阶段求解
     B_,C_,D_ = reform_data(B,C,D,level=1)
-    CYCCLES,stage1_obj=CVRP(B_,C_,D_)
+    CYCCLES,stage1_obj=CVRP(B_,C_,D_,level=1)
     sum_obj+=stage1_obj
 
     # 将cycle中的B_路径转换为原始的B路径，同时保留拆分后的需求信息
@@ -452,7 +464,7 @@ if __name__ == "__main__":
         
         # 二阶段求解
         b_, c_, d_ = reform_data(b, c, d, level=2)
-        cycles, obj = CVRP(b_, c_, d_, Q=Q)
+        cycles, obj = CVRP(b_, c_, d_, Q=Q, level=2)
         stage2_total += obj
         
         # 结果输出：全向图路径
