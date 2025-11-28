@@ -7,6 +7,6 @@ input:楼栋信息(B)，需求(D)，每栋楼内的物理网络G_i(考虑隐私�
 #level2
 for i in B:
     按按Q=4复制房间节点，使用nx.shortest_path_length函数，将物理网络G_i处理为楼内全向图距离矩阵(c_i)
-    得到b_i，c_i，d_i数据，使用CVRP模型求解
+    得到b_i，c_i，d_i数据，使用CVRP模型+定制cut(只允许一条非满载cycle,仅对二阶段模型启用)求解
     使用nx.shortest_path函数将解从全向图映射回物理网络G_i
 end
