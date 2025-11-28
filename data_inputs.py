@@ -208,7 +208,7 @@ def generate_physical_network_by_index(num_floors, rooms_per_floor, room_demands
     return a, b, c, d
 
 
-def generate_physical_network_for_demands(room_demands, rooms_per_floor, k=10, intra_floor_weight=1, include_floor1=True, close_loop=False):
+def generate_physical_network_for_demands(room_demands, rooms_per_floor, k=10,con_cost=20, intra_floor_weight=1, include_floor1=True, close_loop=False):
     """Generate `a, b, c, d` based only on floors that appear in `room_demands`.
 
     Behavior:
@@ -314,7 +314,7 @@ def generate_physical_network_for_demands(room_demands, rooms_per_floor, k=10, i
             fu = int(str(u).split('.')[0])
             fv = int(str(v).split('.')[0])
             if str(u).endswith('.0') and str(v).endswith('.0') and fu != fv:
-                w = k * abs(fu - fv)
+                w = k * abs(fu - fv) + con_cost
             else:
                 w = intra_floor_weight
         except Exception:

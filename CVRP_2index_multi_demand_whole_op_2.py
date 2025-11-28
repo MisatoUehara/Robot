@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 # ============================================================================
 # 配置参数 / Configuration Parameters
 # ============================================================================
-RANDOM_SEED = 2                # 随机种子 / Random seed for reproducibility
-Q = 4                          # 机器人载重量 / Robot capacity (packages)
+RANDOM_SEED = 200              # 随机种子 / Random seed for reproducibility
+Q = 4                       # 机器人载重量 / Robot capacity (packages)
 
 # 一阶段参数 / Stage 1 Parameters (Building-level delivery)
 NUM_BUILDINGS = 5              # 楼栋数量（不包括仓库）/ Number of buildings (excluding depot)
@@ -19,9 +19,10 @@ MAX_BUILDING_DEMAND = 20        # 楼栋最大需求 / Max demand per building
 
 # 二阶段参数 / Stage 2 Parameters (Room-level delivery)
 NUM_FLOORS = 5                  # 每栋楼层数 / Number of floors per building
-ROOMS_PER_FLOOR = 3             # 每层房间数 / Number of rooms per floor
+ROOMS_PER_FLOOR = 5             # 每层房间数 / Number of rooms per floor
 FLOOR_DISTANCE = 5              # 楼层间距离（垂直移动成本）/ Distance between floors (vertical cost)
 ROOM_DISTANCE = 1               # 同层房间间距离（水平移动成本）/ Distance between rooms on same floor (horizontal cost)
+CON_COST = 20                  # 楼层连接的固定连接代价 / Inter-floor connector cost added to transfer edges
 
 # 房间需求分配概率 / Room demand allocation probability
 PROB_1_PACKAGE = 0.70           # 1个包裹的概率 / Probability of 1 package
@@ -30,10 +31,10 @@ PROB_3_PACKAGES = 0.07          # 3个包裹的概率 / Probability of 3 package
 # 其余概率为4个包裹 / Remaining probability is for 4 packages
 
 # 可视化参数 / Visualization Parameters
-ENABLE_VISUALIZATION = True     # 启用可视化 / Enable visualization
+ENABLE_VISUALIZATION = True  # 启用可视化 / Enable visualization
 SHOW_STAGE1_VIS = True          # 显示一阶段可视化 / Show stage 1 visualization
 SHOW_STAGE2_VIS = True          # 显示二阶段可视化 / Show stage 2 visualization
-MAX_STAGE2_BUILDINGS_VIS = 3    # 最多显示几个楼栋的二阶段路径 / Max buildings to visualize in stage 2
+MAX_STAGE2_BUILDINGS_VIS = 1  # 最多显示几个楼栋的二阶段路径 / Max buildings to visualize in stage 2
 # ============================================================================
 
 random.seed(RANDOM_SEED)  # Change this number to get different random results
@@ -397,61 +398,31 @@ if __name__ == "__main__":
     stage2_total = 0
     vis_count = 0  # 用于限制可视化的楼栋数量
     
-    # 为每栋有需求的楼栋生成房间需求并优化
+    # 引入 helper
+    from data_inputs import generate_physical_network_for_demands
+
+    # 1. 预先为每栋楼生成房间需求 (Pre-generate room demands)
+    building_room_demands = {}
     for building_id in range(1, len(B)):
         if D[building_id] <= 0:
             continue
         
-        total_demand = D[building_id]
-        print(f"\n--- 楼栋 {building_id} (总需求: {total_demand}) ---")
+        # 生成所有房间列表
+        rooms = []
+        for f in range(1, NUM_FLOORS + 1):
+            for r in range(1, ROOMS_PER_FLOOR + 1):
+                rooms.append(f"{f}.{r}")
         
-        # 生成物理网络：楼层链式结构，每层有多个房间
-        a = []  # 边
-        b = ['1.0']  # 节点，从入口开始
+        random.shuffle(rooms)
         
-        # 为每层生成节点和边
-        for floor in range(1, NUM_FLOORS + 1):
-            floor_entrance = f"{floor}.0"
-            b.append(floor_entrance)
-            
-            # 连接入口到楼层入口（或上一层到当前层）
-            if floor == 1:
-                a.append(('1.0', floor_entrance))
-            else:
-                prev_floor = f"{floor-1}.0"
-                a.append((prev_floor, floor_entrance))
-            
-            # 为该层生成房间
-            for room in range(1, ROOMS_PER_FLOOR + 1):
-                room_id = f"{floor}.{room}"
-                b.append(room_id)
-                if room == 1:
-                    a.append((floor_entrance, room_id))
-                else:
-                    prev_room = f"{floor}.{room-1}"
-                    a.append((prev_room, room_id))
+        # 将总需求 D[building_id] 分配到各个房间
+        d_rooms = {}
+        remaining = D[building_id]
         
-        # 设置边的权重：楼层间距离为5，同层房间间距离为1
-        c = {}
-        for (u, v) in a:
-            # 判断是否为楼层间的边
-            u_floor = int(u.split('.')[0]) if u != '1.0' else 1
-            v_floor = int(v.split('.')[0])
-            if u == '1.0' or (u.endswith('.0') and v.endswith('.0')):
-                c[(u, v)] = FLOOR_DISTANCE  # 楼层间距离
-            else:
-                c[(u, v)] = ROOM_DISTANCE  # 同层房间间距离
-        
-        # 生成房间需求：随机分配到各个房间
-        all_rooms = [node for node in b if not node.endswith('.0') and node != '1.0']
-        random.shuffle(all_rooms)
-        
-        d = {}
-        remaining = total_demand
-        for room_id in all_rooms:
+        for room_id in rooms:
             if remaining <= 0:
                 break
-            # 每个房间随机分配1-4个包裹
+            # 随机分配 1-4 个包裹
             rand_val = random.random()
             if rand_val < PROB_1_PACKAGE:
                 packages = 1
@@ -461,21 +432,54 @@ if __name__ == "__main__":
                 packages = 3
             else:
                 packages = 4
+            
             packages = min(packages, remaining)
             if packages > 0:
-                d[room_id] = packages
+                d_rooms[room_id] = packages
                 remaining -= packages
         
-        # 如果还有剩余需求，分配到最后一个房间
-        if remaining > 0 and d:
-            last_room = list(d.keys())[-1]
-            d[last_room] += remaining
+        # 如果还有剩余，分配给最后一个房间
+        if remaining > 0 and d_rooms:
+            last_room = list(d_rooms.keys())[-1]
+            d_rooms[last_room] += remaining
+        elif remaining > 0:
+            d_rooms[rooms[0]] = remaining
+
+        building_room_demands[building_id] = d_rooms
+        print(f"楼栋 {building_id} 预生成房间需求 (总: {D[building_id]}): {d_rooms}")
+
+    # 2. 针对每栋楼，使用其完整需求进行二阶段优化 (Optimize Stage 2 for each building using its full demand)
+    # 不再根据 Stage 1 的拆分结果进行分批优化，而是对整栋楼的需求一次性优化
+    
+    for building_id in range(1, len(B)):
+        total_demand = D[building_id]
+        if total_demand <= 0:
+            continue
+            
+        print(f"\n=== 楼栋 {building_id} (总需求: {total_demand}) ===")
         
-        print(f"房间需求: {d}")
+        # 获取该楼栋的所有房间需求
+        if building_id not in building_room_demands:
+            print("无房间需求信息")
+            continue
+            
+        d_rooms = building_room_demands[building_id]
+        print(f"房间需求: {d_rooms}")
         
-        if not d:
+        if not d_rooms:
             print("无房间需求，跳过")
             continue
+            
+        # 生成物理网络 (针对整栋楼的所有需求点)
+        a, b, c, d = generate_physical_network_for_demands(
+            room_demands=d_rooms,
+            rooms_per_floor=ROOMS_PER_FLOOR,
+            k=FLOOR_DISTANCE,
+            con_cost=CON_COST,
+            intra_floor_weight=ROOM_DISTANCE,
+            include_floor1=True,
+            close_loop=True
+        )
         
         # 二阶段求解
         b_, c_, d_ = reform_data(b, c, d, level=2, Q=Q)
@@ -520,7 +524,7 @@ if __name__ == "__main__":
         
         print(f"楼内物理网络配送方案: {physical_path}")
         print(f"本次配送楼内距离: {obj}")
-        
+            
         # 可视化二阶段路径（限制可视化的楼栋数量）
         if ENABLE_VISUALIZATION and SHOW_STAGE2_VIS and vis_count < MAX_STAGE2_BUILDINGS_VIS:
             visualize_stage2_routes(building_id, b, a, c, d, physical_path, original_cycles, cycle_demands)
