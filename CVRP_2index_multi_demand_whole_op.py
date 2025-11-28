@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 # 配置参数 / Configuration Parameters
 # ============================================================================
 RANDOM_SEED = 42                # 随机种子 / Random seed for reproducibility
-Q = 4                           # 机器人载重量 / Robot capacity (packages)
+Q = 4                          # 机器人载重量 / Robot capacity (packages)
 
 # 一阶段参数 / Stage 1 Parameters (Building-level delivery)
 NUM_BUILDINGS = 5              # 楼栋数量（不包括仓库）/ Number of buildings (excluding depot)
@@ -30,7 +30,7 @@ PROB_3_PACKAGES = 0.07          # 3个包裹的概率 / Probability of 3 package
 # 其余概率为4个包裹 / Remaining probability is for 4 packages
 
 # 可视化参数 / Visualization Parameters
-ENABLE_VISUALIZATION = False     # 启用可视化 / Enable visualization
+ENABLE_VISUALIZATION = True     # 启用可视化 / Enable visualization
 SHOW_STAGE1_VIS = True          # 显示一阶段可视化 / Show stage 1 visualization
 SHOW_STAGE2_VIS = True          # 显示二阶段可视化 / Show stage 2 visualization
 MAX_STAGE2_BUILDINGS_VIS = 3    # 最多显示几个楼栋的二阶段路径 / Max buildings to visualize in stage 2
@@ -38,9 +38,9 @@ MAX_STAGE2_BUILDINGS_VIS = 3    # 最多显示几个楼栋的二阶段路径 / M
 
 random.seed(RANDOM_SEED)  # Change this number to get different random results
 
-def reform_data(B,C,D,level):
+def reform_data(B,C,D,level,Q=Q):
 
-    #input重构，拆分需求大于4的节点
+    #input重构，拆分需求大于Q的节点
     if level == 1:
         B_ = {0: 0}  # depot保持原样
     elif level == 2:
@@ -52,8 +52,8 @@ def reform_data(B,C,D,level):
     for i in D:
         remaining_demand = D[i]
         while remaining_demand > 0:
-            # 每个新节点的需求最多为4,超过4则在原位置复制一个节点
-            current_demand = min(remaining_demand, 4)
+            # 每个新节点的需求最多为Q,超过Q则在原位置复制一个节点
+            current_demand = min(remaining_demand, Q)
             B_[idx] = i
             D_[idx] = current_demand
             remaining_demand -= current_demand
@@ -133,6 +133,21 @@ def CVRP(B,C,D,level,Q=Q):
     MD.Params.lazyConstraints = 1
     MD.Params.OutputFlag=0 #不输出求解过程
     MD.optimize(Cut)
+
+    # 检查求解状态
+    if MD.status != GRB.OPTIMAL:
+        print(f"\n⚠️ 模型求解失败! 状态码: {MD.status}")
+        if MD.status == GRB.INFEASIBLE:
+            print("模型不可行 - 约束冲突，无法找到满足所有约束的解")
+            print(f"需求总和: {sum(D.values())}, 容量Q: {Q}, 所需车辆数: {len(V)}")
+            MD.computeIIS()
+            print("不可行约束已写入文件 model.ilp")
+            MD.write("model.ilp")
+        elif MD.status == GRB.UNBOUNDED:
+            print("模型无界 - 目标函数可以无限优化")
+        else:
+            print(f"其他求解问题，详情请查看Gurobi状态码: {MD.status}")
+        raise Exception("CVRP模型求解失败")
 
     #构造回路
     edges = [(i,j) for (i,j) in C if x[i,j].X > 0.5]
@@ -333,8 +348,8 @@ if __name__ == "__main__":
 
 
     #一阶段求解
-    B_,C_,D_ = reform_data(B,C,D,level=1)
-    CYCCLES,stage1_obj=CVRP(B_,C_,D_,level=1)
+    B_,C_,D_ = reform_data(B,C,D,level=1,Q=Q)
+    CYCCLES,stage1_obj=CVRP(B_,C_,D_,level=1,Q=Q)
     sum_obj+=stage1_obj
 
     # 将cycle中的B_路径转换为原始的B路径，同时保留拆分后的需求信息
@@ -366,8 +381,8 @@ if __name__ == "__main__":
         print(f"路线 #{idx+1}: {route}")
         print(f"  楼栋拆分需求: {split_demand_map}")
         print(f"  路线总需求: {total_demand}")
-        if total_demand > 4:
-            print(f"  ⚠️ 警告: 本路线总需求 {total_demand} 超过容量 Q=4! (此路线包含多个楼栋)")
+        if total_demand > Q:
+            print(f"  ⚠️ 警告: 本路线总需求 {total_demand} 超过容量 Q={Q}! (此路线包含多个楼栋)")
         print()
 
     # 可视化一阶段路径
@@ -463,7 +478,7 @@ if __name__ == "__main__":
             continue
         
         # 二阶段求解
-        b_, c_, d_ = reform_data(b, c, d, level=2)
+        b_, c_, d_ = reform_data(b, c, d, level=2, Q=Q)
         cycles, obj = CVRP(b_, c_, d_, Q=Q, level=2)
         stage2_total += obj
         

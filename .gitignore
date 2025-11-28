@@ -1,0 +1,21 @@
+# Visualization output files
+*.png
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Gurobi files
+*.ilp
+*.lp
+*.mps
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
