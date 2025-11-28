@@ -4,10 +4,9 @@ input:楼栋信息(B)，需求(D)，每栋楼内的物理网络G_i(考虑隐私�
 按Q=4复制大楼节点，得到大楼全向图距离矩阵(C)
 得到B，C，D数据，使用CVRP模型求解
 
-    #level2
-    for i in B:
+#level2
+for i in B:
     按按Q=4复制房间节点，使用nx.shortest_path_length函数，将物理网络G_i处理为楼内全向图距离矩阵(c_i)
     得到b_i，c_i，d_i数据，使用CVRP模型求解
     使用nx.shortest_path函数将解从全向图映射回物理网络G_i
-    end for
 end
