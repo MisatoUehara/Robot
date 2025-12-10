@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 # ============================================================================
 # 配置参数 / Configuration Parameters
 # ============================================================================
-RANDOM_SEED = 200              # 随机种子 / Random seed for reproducibility
+RANDOM_SEED = 10              # 随机种子 / Random seed for reproducibility
 Q = 4                       # 机器人载重量 / Robot capacity (packages)
 
 # 一阶段参数 / Stage 1 Parameters (Building-level delivery)
@@ -15,7 +15,7 @@ NUM_BUILDINGS = 5              # 楼栋数量（不包括仓库）/ Number of bu
 MIN_BUILDING_DISTANCE = 20      # 楼栋间最小距离 / Min distance between buildings
 MAX_BUILDING_DISTANCE = 50      # 楼栋间最大距离 / Max distance between buildings
 MIN_BUILDING_DEMAND = 0         # 楼栋最小需求 / Min demand per building
-MAX_BUILDING_DEMAND = 20        # 楼栋最大需求 / Max demand per building
+MAX_BUILDING_DEMAND = 16        # 楼栋最大需求 / Max demand per building
 
 # 二阶段参数 / Stage 2 Parameters (Room-level delivery)
 NUM_FLOORS = 5                  # 每栋楼层数 / Number of floors per building
@@ -32,7 +32,7 @@ PROB_3_PACKAGES = 0.07          # 3个包裹的概率 / Probability of 3 package
 
 # 可视化参数 / Visualization Parameters
 ENABLE_VISUALIZATION = True  # 启用可视化 / Enable visualization
-SHOW_STAGE1_VIS = True          # 显示一阶段可视化 / Show stage 1 visualization
+SHOW_STAGE1_VIS = False          # 显示一阶段可视化 / Show stage 1 visualization
 SHOW_STAGE2_VIS = True          # 显示二阶段可视化 / Show stage 2 visualization
 MAX_STAGE2_BUILDINGS_VIS = 1  # 最多显示几个楼栋的二阶段路径 / Max buildings to visualize in stage 2
 # ============================================================================
@@ -174,6 +174,17 @@ def CVRP(B,C,D,level,Q=Q):
 
     return cycles,MD.ObjVal
 
+def remove_edge(a, c, u, v):
+            # remove both (u,v) and (v,u) if present
+            a[:] = [e for e in a if not ((e[0] == u and e[1] == v) or (e[0] == v and e[1] == u))]
+            c.pop((u, v), None)
+            c.pop((v, u), None)
+
+def add_edge(a, c, u, v, weight):
+    if (u, v) not in a and (v, u) not in a:
+        a.append((u, v))
+    c[(u, v)] = weight
+    c[(v, u)] = weight  # keep symmetric for undirected graph
 
 from visualization import visualize_stage1_routes, visualize_stage2_routes
 
@@ -238,7 +249,7 @@ if __name__ == "__main__":
     # 可视化一阶段路径
     if ENABLE_VISUALIZATION and SHOW_STAGE1_VIS:
         print("\n=== 生成一阶段可视化 ===")
-        visualize_stage1_routes(B, C, D, ORIGINAL_CYCCLES)
+        visualize_stage1_routes(B, C, D, ORIGINAL_CYCCLES, Q=Q)
 
     # 二阶段：根据原始需求生成房间需求并优化
     print("\n=== 二阶段：楼内配送优化 ===")
@@ -329,6 +340,25 @@ if __name__ == "__main__":
             include_floor1=True,
             close_loop=True
         )
+
+        # After generate_physical_network_for_demands(...)
+
+        
+
+        # Apply the edit pattern on all floors 1..NUM_FLOORS
+        # Break connection between f.4 and f.3; add connection between f.0 and f.4
+        for f in range(1, NUM_FLOORS + 1):
+            room_4 = f"{f}.4"
+            room_3 = f"{f}.3"
+            room_2 = f"{f}.2"
+            entrance = f"{f}.0"
+            remove_edge(a, c, room_4, room_3)
+            remove_edge(a, c, room_2, room_3)
+
+            
+            add_edge(a, c, entrance, room_3, ROOM_DISTANCE)
+
+
         
         # 二阶段求解
         b_, c_, d_ = reform_data(b, c, d, level=2, Q=Q)
@@ -376,7 +406,7 @@ if __name__ == "__main__":
             
         # 可视化二阶段路径（限制可视化的楼栋数量）
         if ENABLE_VISUALIZATION and SHOW_STAGE2_VIS and vis_count < MAX_STAGE2_BUILDINGS_VIS:
-            visualize_stage2_routes(building_id, b, a, c, d, physical_path, original_cycles, cycle_demands)
+            visualize_stage2_routes(building_id, b, a, c, d, physical_path, original_cycles, cycle_demands, Q=Q)
             vis_count += 1
     
     sum_obj += stage2_total
