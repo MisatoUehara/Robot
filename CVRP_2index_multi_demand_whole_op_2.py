@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 # ============================================================================
 # 配置参数 / Configuration Parameters
 # ============================================================================
-RANDOM_SEED = 10              # 随机种子 / Random seed for reproducibility
+RANDOM_SEED = 20              # 随机种子 / Random seed for reproducibility
 Q = 4                       # 机器人载重量 / Robot capacity (packages)
 
 # 一阶段参数 / Stage 1 Parameters (Building-level delivery)
@@ -19,7 +19,7 @@ MAX_BUILDING_DEMAND = 16        # 楼栋最大需求 / Max demand per building
 
 # 二阶段参数 / Stage 2 Parameters (Room-level delivery)
 NUM_FLOORS = 5                  # 每栋楼层数 / Number of floors per building
-ROOMS_PER_FLOOR = 5             # 每层房间数 / Number of rooms per floor
+ROOMS_PER_FLOOR = 3             # 每层房间数 / Number of rooms per floor
 FLOOR_DISTANCE = 5              # 楼层间距离（垂直移动成本）/ Distance between floors (vertical cost)
 ROOM_DISTANCE = 1               # 同层房间间距离（水平移动成本）/ Distance between rooms on same floor (horizontal cost)
 CON_COST = 20                  # 楼层连接的固定连接代价 / Inter-floor connector cost added to transfer edges
@@ -186,6 +186,19 @@ def add_edge(a, c, u, v, weight):
     c[(u, v)] = weight
     c[(v, u)] = weight  # keep symmetric for undirected graph
 
+def set_incident_edge_weights(a, c, node, weight):
+    """Set all edges incident to `node` to a specific `weight` (both directions).
+    - `a`: edge list of tuples (u, v)
+    - `c`: weight dict keyed by (u, v)
+    - `node`: node id, e.g., '3.5' or '1.0'
+    - `weight`: numeric value to apply
+    """
+    # Iterate over a copy to avoid mid-iteration issues
+    for (u, v) in list(a):
+        if u == node or v == node:
+            c[(u, v)] = weight
+            c[(v, u)] = weight
+
 from visualization import visualize_stage1_routes, visualize_stage2_routes
 
 
@@ -341,7 +354,14 @@ if __name__ == "__main__":
             close_loop=True
         )
 
-        # After generate_physical_network_for_demands(...)
+        # After generate_physical_network_for_demands(...): example topology/weight edits
+        # Example: change all edges touching floor-3 entrance '3.0' to weight 2
+        # set_incident_edge_weights(a, c, '3.5', 20)
+        # set_incident_edge_weights(a, c, '2.3', 20)
+        # set_incident_edge_weights(a, c, '4.2', 20)
+
+        # Example: break connection between a specific pair (uncomment and define if needed)
+        # remove_edge(a, c, '3.4', '3.3')
 
         
 
@@ -353,10 +373,12 @@ if __name__ == "__main__":
         #     room_2 = f"{f}.2"
         #     entrance = f"{f}.0"
         #     remove_edge(a, c, room_4, room_3)
-            # remove_edge(a, c, room_2, room_3)
+        #     remove_edge(a, c, room_2, room_3)
 
             
-            # add_edge(a, c, entrance, room_3, ROOM_DISTANCE)
+        #     # Set all incident weights around entrance to a custom value (e.g., 2)
+        #     set_incident_edge_weights(a, c, entrance, 2)
+        #     add_edge(a, c, entrance, room_3, ROOM_DISTANCE)
 
 
         
