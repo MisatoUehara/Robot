@@ -163,6 +163,31 @@ def visualize_stage2_routes(
 
     colors = plt.cm.Dark2(np.linspace(0, 1, len(physical_paths)))
 
+    # helper to decide if a segment should be curved (spans >1 node)
+    def _needs_curve(u: str, v: str) -> bool:
+        try:
+            fu, ru = map(int, u.split('.'))
+            fv, rv = map(int, v.split('.'))
+            return abs(fu - fv) > 0 or abs(rv - ru) > 1
+        except Exception:
+            return True
+
+    # helper to compute curvature magnitude and sign based on gap
+    def _curvature(u: str, v: str, idx: int, total_paths: int) -> float:
+        try:
+            fu, ru = map(int, u.split('.'))
+            fv, rv = map(int, v.split('.'))
+            df = abs(fu - fv)
+            dr = abs(rv - ru)
+        except Exception:
+            df, dr = 0, 2
+        gap = df * 2 + max(0, dr - 1)
+        base = 0.01
+        mag = base + 0.03 * gap
+        # alternate sign by route index to reduce overlap
+        sign = -1 if (idx % 2 == 0) else 1
+        return sign * mag
+
     if split_subplots and len(physical_paths) > 1:
         # draw separate subplots per trip to ensure visibility
         fig2, axes = plt.subplots(len(physical_paths), 1, figsize=(13, 3.5*len(physical_paths)), sharex=True)
@@ -176,14 +201,29 @@ def visualize_stage2_routes(
                 x = [pos[u][0], pos[v][0]]
                 y = [pos[u][1], pos[v][1]]
                 ax_i.plot(x, y, color='#b0b0b0', alpha=0.25, linewidth=1, zorder=1)
-            # draw route
+            # draw route (curved if spanning >1 node)
             for i in range(len(path) - 1):
                 start, end = path[i], path[i+1]
-                x = [pos[start][0], pos[end][0]]
-                y = [pos[start][1], pos[end][1]]
-                ax_i.plot(x, y, color=colors[idx], linewidth=3, alpha=0.9, zorder=3)
-                mid_x = (x[0] + x[1]) / 2
-                mid_y = (y[0] + y[1]) / 2
+                x0, y0 = pos[start]
+                x1, y1 = pos[end]
+                if _needs_curve(start, end):
+                    try:
+                        from matplotlib.patches import FancyArrowPatch
+                        curvature = _curvature(start, end, idx, len(physical_paths))
+                        arrow = FancyArrowPatch(
+                            posA=(x0, y0), posB=(x1, y1),
+                            connectionstyle=f"arc3,rad={curvature}",
+                            arrowstyle='-|>', mutation_scale=12,
+                            lw=2.2, color=colors[idx], alpha=0.9, zorder=3
+                        )
+                        ax_i.add_patch(arrow)
+                    except Exception:
+                        ax_i.plot([x0, x1], [y0, y1], color=colors[idx], linewidth=2.2, alpha=0.9, zorder=3)
+                else:
+                    # adjacent connection: straight line
+                    ax_i.plot([x0, x1], [y0, y1], color=colors[idx], linewidth=2.2, alpha=0.9, zorder=3)
+                mid_x = (x0 + x1) / 2
+                mid_y = (y0 + y1) / 2
                 if SHOW_STEP_NUMBERS:
                     ax_i.annotate(str(i+1), xy=(mid_x, mid_y), xytext=(mid_x, mid_y),
                                   textcoords='data', ha='center', va='center', fontsize=9, color='white',
@@ -207,40 +247,33 @@ def visualize_stage2_routes(
             ax_i.axis('off')
         fig2.tight_layout()
 
-    # routes in combined view; use curvature (not vertical offset) to reduce overlap
+    # routes in combined view; curve segments that span >1 node
     for idx, (path, color, demand) in enumerate(zip(physical_paths, colors, cycle_demands)):
         # no y-offset; keep endpoints aligned to node centers
         for i in range(len(path) - 1):
             start, end = path[i], path[i+1]
-            x = [pos[start][0], pos[end][0]]
-            y = [pos[start][1], pos[end][1]]
-            # draw as curved arrow to avoid overlap; curvature varies by route index
-            try:
-                from matplotlib.patches import FancyArrowPatch
-                curvature = 0.12 * (idx - (len(physical_paths)-1)/2)
-                # underlay glow
-                glow = FancyArrowPatch(
-                    posA=(x[0], y[0]), posB=(x[1], y[1]),
-                    connectionstyle=f"arc3,rad={curvature}",
-                    arrowstyle='-'
-                    , lw=4, color=color, alpha=0.2, zorder=2
-                )
-                ax.add_patch(glow)
-                # main curved arrow with head
-                arrow = FancyArrowPatch(
-                    posA=(x[0], y[0]), posB=(x[1], y[1]),
-                    connectionstyle=f"arc3,rad={curvature}",
-                    arrowstyle='-|>', mutation_scale=13,
-                    lw=2.2, color=color, alpha=0.95,
-                    zorder=3
-                )
-                ax.add_patch(arrow)
-                if i == 0:
-                    ax.plot([], [], color=color, linewidth=2.2, alpha=0.95,
-                            label=f'Trip {idx+1} (Load: {demand})')
-            except Exception:
-                # fallback straight line if patches fail
-                ax.plot(x, y, color=color, linewidth=2.2, alpha=0.9,
+            x0, y0 = pos[start]
+            x1, y1 = pos[end]
+            if _needs_curve(start, end):
+                try:
+                    from matplotlib.patches import FancyArrowPatch
+                    curvature = _curvature(start, end, idx, len(physical_paths))
+                    arrow = FancyArrowPatch(
+                        posA=(x0, y0), posB=(x1, y1),
+                        connectionstyle=f"arc3,rad={curvature}",
+                        arrowstyle='-|>', mutation_scale=13,
+                        lw=2.2, color=color, alpha=0.95, zorder=3
+                    )
+                    ax.add_patch(arrow)
+                    if i == 0:
+                        ax.plot([], [], color=color, linewidth=2.2, alpha=0.95,
+                                label=f'Trip {idx+1} (Load: {demand})')
+                except Exception:
+                    ax.plot([x0, x1], [y0, y1], color=color, linewidth=2.2, alpha=0.9,
+                            label=f'Trip {idx+1} (Load: {demand})' if i == 0 else '', zorder=3)
+            else:
+                # adjacent connection: straight line
+                ax.plot([x0, x1], [y0, y1], color=color, linewidth=2.2, alpha=0.95,
                         label=f'Trip {idx+1} (Load: {demand})' if i == 0 else '', zorder=3)
             # Highlight closing loop edges x.N -> x.0 with a directional arrow overlay
             if (not start.endswith('.0')) and end.endswith('.0'):
@@ -257,8 +290,8 @@ def visualize_stage2_routes(
                     ax.add_patch(arrow)
                 except Exception:
                     pass
-            mid_x = (x[0] + x[1]) / 2
-            mid_y = (y[0] + y[1]) / 2
+            mid_x = (x0 + x1) / 2
+            mid_y = (y0 + y1) / 2
             if SHOW_STEP_NUMBERS:
                 ax.annotate(str(i+1), xy=(mid_x, mid_y), xytext=(mid_x, mid_y),
                             textcoords='data', ha='center', va='center',

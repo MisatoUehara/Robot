@@ -345,18 +345,18 @@ if __name__ == "__main__":
 
         
 
-        # Apply the edit pattern on all floors 1..NUM_FLOORS
-        # Break connection between f.4 and f.3; add connection between f.0 and f.4
-        for f in range(1, NUM_FLOORS + 1):
-            room_4 = f"{f}.4"
-            room_3 = f"{f}.3"
-            room_2 = f"{f}.2"
-            entrance = f"{f}.0"
-            remove_edge(a, c, room_4, room_3)
-            remove_edge(a, c, room_2, room_3)
+        # # Apply the edit pattern on all floors 1..NUM_FLOORS
+        # # Break connection between f.4 and f.3; add connection between f.0 and f.4
+        # for f in range(1, NUM_FLOORS + 1):
+        #     room_4 = f"{f}.4"
+        #     room_3 = f"{f}.3"
+        #     room_2 = f"{f}.2"
+        #     entrance = f"{f}.0"
+        #     remove_edge(a, c, room_4, room_3)
+            # remove_edge(a, c, room_2, room_3)
 
             
-            add_edge(a, c, entrance, room_3, ROOM_DISTANCE)
+            # add_edge(a, c, entrance, room_3, ROOM_DISTANCE)
 
 
         
