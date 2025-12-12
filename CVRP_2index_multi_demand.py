@@ -1,5 +1,5 @@
 from gurobipy import *
-import math,random,networkx
+import math,random,networkx,time
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -56,8 +56,23 @@ def reform_data(B,C,D,level):
 
 #CVRP模型,一阶段处理楼栋配送,二阶段处理楼内配送
 def CVRP(B,C,D,level,Q=4):
+    timeValue=[]
+    Lowerbound=[]
+    Upperbound=[]
+    start_time = time.time()
+    last_record_time = start_time
     V = [i for i in range(math.ceil(sum(D.values())/Q))]
     def Cut(model,where):
+        #获取求解信息
+        nonlocal last_record_time  # 声明使用外层变量
+        if where == GRB.Callback.MIP:
+            current_time = time.time()
+            if current_time - last_record_time >= 0.5: #时间参数，每0.5秒记录一次
+                timeValue.append(model.cbGet(GRB.Callback.RUNTIME))
+                Lowerbound.append(model.cbGet(GRB.Callback.MIP_OBJBND))
+                Upperbound.append(model.cbGet(GRB.Callback.MIP_OBJBST))
+                last_record_time = current_time
+        #添加Cut
         if where == GRB.Callback.MIPSOL:
             edges = [(i,j) for (i,j) in C if model.cbGetSolution(x[i,j]) > 0.5]
             G = networkx.DiGraph()
@@ -99,7 +114,7 @@ def CVRP(B,C,D,level,Q=4):
     #目标函数
     MD.setObjective(quicksum(C[i,j]*x[i,j] for (i,j) in C), GRB.MINIMIZE)
     MD.Params.lazyConstraints = 1
-    MD.Params.OutputFlag=0 #不输出求解过程
+    # MD.Params.OutputFlag=0 #如果你想看gurobi的求解过程,可以注释掉这一行。但是，不管注释与否,都能画出上下界变化图。
     MD.optimize(Cut)
 
     #构造回路
@@ -124,6 +139,23 @@ def CVRP(B,C,D,level,Q=4):
     # plt.axis('off')
     # plt.show()
 
+    # 记录最后一个点(可能没有到达Cut中触发时间)
+    if MD.Status == GRB.OPTIMAL:        #若最优解
+        timeValue.append(MD.Runtime)
+        Lowerbound.append(MD.ObjVal)    #最优解时,则上下界相等,直接添加最优解即可
+        Upperbound.append(MD.ObjVal)    #最优解时,则上下界相等,直接添加最优解即可
+    # 将Upperbound中大于等于1e+100的数值替换为None,避免画图出现极大值影响视觉
+    Upperbound = [None if val  >= 1e+100 else val for val in Upperbound]
+    # 画图
+    plt.figure(figsize=(10, 6))
+    plt.plot(timeValue, Upperbound, 'r-', linewidth=2, label='Upper Bound', marker='s', markersize=4) #上界，MILP的整数可行解，LB=UB时为最优解
+    plt.plot(timeValue, Lowerbound, 'b-', linewidth=2, label='Lower Bound', marker='o', markersize=4) #下界，MILP的线性松弛解，LB=UB时为最优解
+    plt.xlabel('Time (seconds)', fontsize=12)
+    plt.ylabel('Objective Value', fontsize=12)
+    plt.title('Convergence of Lower and Upper Bounds', fontsize=14, fontweight='bold')
+    plt.legend(loc='upper left')
+    plt.show()
+
     return cycles,MD.ObjVal
 
 
@@ -132,7 +164,7 @@ if __name__ == "__main__":
 
     # input,一阶段都用大写字母,二阶段都用小写字母,主要参数B,C,D,a,b,c,d
     # 一阶段数据
-    B=[i for i in range(15)]                    #仓库(0)和楼栋编号
+    B=[i for i in range(18)]                    #仓库(0)和楼栋编号
     C={}                                        #距离
     for i in B:
         for j in B:
