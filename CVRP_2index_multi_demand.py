@@ -96,7 +96,7 @@ def CVRP(B,C,D,level,Q=4):
                     a=non_full_cycle[0]
                     b=non_full_cycle[1]
                     #约束6,非满载回路合并约束,仅对level2模型启用,作为lazy constraint动态加入,消除多条非满载回路
-                    model.cbLazy(quicksum(x[a[i],a[i+1]] for i in range(len(a)-1))+quicksum(x[b[i],b[i+1]] for i in range(len(b)-1))<=len(a)+len(b)-3)
+                    model.cbLazy(quicksum(x[a[i],a[i+1]] for i in range(len(a)-1))+quicksum(x[b[i],b[i+1]] for i in range(len(b)-1))<=len(a)+len(b)-3) #此处-3,实际上相当于sum ij∈a xij+ sum ij∈b xij<=|a|+|b|-1, 因为cycle不包括最后返回0的那个arc
 
     MD = Model()
 
