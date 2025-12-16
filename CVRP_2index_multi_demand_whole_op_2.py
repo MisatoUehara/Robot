@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 # ============================================================================
 # 配置参数 / Configuration Parameters
 # ============================================================================
-RANDOM_SEED = 20              # 随机种子 / Random seed for reproducibility
+RANDOM_SEED = 2000              # 随机种子 / Random seed for reproducibility
 Q = 4                       # 机器人载重量 / Robot capacity (packages)
 
 # 一阶段参数 / Stage 1 Parameters (Building-level delivery)
@@ -15,11 +15,11 @@ NUM_BUILDINGS = 5              # 楼栋数量（不包括仓库）/ Number of bu
 MIN_BUILDING_DISTANCE = 20      # 楼栋间最小距离 / Min distance between buildings
 MAX_BUILDING_DISTANCE = 50      # 楼栋间最大距离 / Max distance between buildings
 MIN_BUILDING_DEMAND = 0         # 楼栋最小需求 / Min demand per building
-MAX_BUILDING_DEMAND = 16        # 楼栋最大需求 / Max demand per building
+MAX_BUILDING_DEMAND = 10        # 楼栋最大需求 / Max demand per building
 
 # 二阶段参数 / Stage 2 Parameters (Room-level delivery)
 NUM_FLOORS = 5                  # 每栋楼层数 / Number of floors per building
-ROOMS_PER_FLOOR = 3             # 每层房间数 / Number of rooms per floor
+ROOMS_PER_FLOOR = 5             # 每层房间数 / Number of rooms per floor
 FLOOR_DISTANCE = 5              # 楼层间距离（垂直移动成本）/ Distance between floors (vertical cost)
 ROOM_DISTANCE = 1               # 同层房间间距离（水平移动成本）/ Distance between rooms on same floor (horizontal cost)
 CON_COST = 20                  # 楼层连接的固定连接代价 / Inter-floor connector cost added to transfer edges
@@ -32,8 +32,8 @@ PROB_3_PACKAGES = 0.07          # 3个包裹的概率 / Probability of 3 package
 
 # 可视化参数 / Visualization Parameters
 ENABLE_VISUALIZATION = True  # 启用可视化 / Enable visualization
-SHOW_STAGE1_VIS = False          # 显示一阶段可视化 / Show stage 1 visualization
-SHOW_STAGE2_VIS = True          # 显示二阶段可视化 / Show stage 2 visualization
+SHOW_STAGE1_VIS = True          # 显示一阶段可视化 / Show stage 1 visualization
+SHOW_STAGE2_VIS = False          # 显示二阶段可视化 / Show stage 2 visualization
 MAX_STAGE2_BUILDINGS_VIS = 1  # 最多显示几个楼栋的二阶段路径 / Max buildings to visualize in stage 2
 # ============================================================================
 
@@ -212,13 +212,16 @@ if __name__ == "__main__":
     for i in B:
         for j in B:
             if i != j:
-                distance = random.randint(MIN_BUILDING_DISTANCE, MAX_BUILDING_DISTANCE)
+                # distance = random.randint(MIN_BUILDING_DISTANCE, MAX_BUILDING_DISTANCE)
+                distance = 100  # 固定距离，便于调试
                 C[(i,j)] = distance
                 C[(j,i)] = distance
             else:
                 C[i,j]=0
     D={i:random.randint(MIN_BUILDING_DEMAND, MAX_BUILDING_DEMAND) for i in B}  #随机需求
     D[0]=0                                      #仓库(0)需求为0
+
+    D={0: 0, 1: 5, 2: 20, 3: 11, 4: 14, 5: 13}
 
 
     #一阶段求解
